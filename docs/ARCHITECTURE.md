@@ -1,5 +1,7 @@
 # CSP Screener architecture
 
+For a navigable single-page visual review, see [architecture-review.html](architecture-review.html). This HTML artifact presents the same target architecture with current and planned components distinguished explicitly.
+
 ## Iteration model
 
 ```mermaid

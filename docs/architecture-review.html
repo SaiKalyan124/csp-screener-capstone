@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSP Screener — End-State Design Preview</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      securityLevel: "loose",
+      themeVariables: {
+        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+        primaryColor: "#f3f0ff",
+        primaryTextColor: "#18213f",
+        primaryBorderColor: "#7559e8",
+        secondaryColor: "#eafaf8",
+        secondaryTextColor: "#133e3a",
+        secondaryBorderColor: "#38a69a",
+        tertiaryColor: "#f7f8fc",
+        lineColor: "#7f88a3",
+        noteBkgColor: "#fff9df",
+        noteTextColor: "#4e4320"
+      },
+      flowchart: { curve: "basis", htmlLabels: true },
+      sequence: { useMaxWidth: true, actorMargin: 42, messageMargin: 30 }
+    });
+  </script>
+  <style>
+    :root {
+      --ink: #111b3d;
+      --muted: #68718a;
+      --line: #dce1ec;
+      --soft: #f6f7fb;
+      --violet: #6c4ff8;
+      --violet-soft: #f1edff;
+      --teal: #168f84;
+      --teal-soft: #e9faf7;
+      --warn: #a96a00;
+      --danger: #a93a52;
+      --sidebar: 238px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    aside {
+      position: fixed;
+      inset: 0 auto 0 0;
+      width: var(--sidebar);
+      padding: 30px 22px;
+      border-right: 1px solid var(--line);
+      background: #fbfbfd;
+      overflow-y: auto;
+    }
+    .brand { display: flex; gap: 12px; align-items: center; font-weight: 750; font-size: 17px; }
+    .brand-mark { width: 28px; height: 28px; display: grid; grid-template-columns: repeat(4,1fr); gap: 3px; align-items: end; }
+    .brand-mark i { display:block; background: var(--ink); border-radius: 2px 2px 0 0; }
+    .brand-mark i:nth-child(1){height:7px}.brand-mark i:nth-child(2){height:13px}.brand-mark i:nth-child(3){height:20px}.brand-mark i:nth-child(4){height:27px}
+    nav { margin-top: 46px; }
+    nav strong { display:block; margin: 0 0 12px 8px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+    nav a { display:flex; gap:10px; align-items:center; padding:9px 10px; margin:2px 0; border-radius:8px; color:#293353; text-decoration:none; font-size:13px; }
+    nav a:hover { background: var(--violet-soft); color: var(--violet); }
+    nav span { width:22px; height:22px; display:grid; place-items:center; border:1px solid #bbc2d4; border-radius:50%; font-size:11px; }
+    .legend { margin-top: 42px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background:#fff; font-size: 11px; color: var(--muted); }
+    .legend b { color:var(--ink); display:block; margin-bottom:8px; }
+    .legend p { margin:6px 0; }
+    .key { display:inline-block; width:24px; height:2px; margin-right:7px; vertical-align:middle; background:var(--violet); }
+    .key.teal { background:var(--teal); }
+    .key.gray { background:#7f88a3; border-top:1px dashed white; }
+    main { margin-left: var(--sidebar); }
+    header { padding: 54px 54px 32px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg,#fff 0%,#fbfbfe 100%); }
+    h1 { margin:0; max-width:900px; font-size: clamp(34px,4vw,58px); line-height:1.02; letter-spacing:-.045em; }
+    header p { max-width: 780px; margin:18px 0 0; font-size:17px; color:var(--muted); }
+    .status { display:flex; flex-wrap:wrap; gap:9px; margin-top:24px; }
+    .status span { padding:6px 10px; border-radius:6px; background:var(--soft); color:#4f5872; font-size:12px; border:1px solid #e6e8f0; }
+    section { padding: 48px 54px; border-bottom:1px solid var(--line); scroll-margin-top:20px; }
+    section:nth-of-type(even){background:#fcfcfe}
+    .section-head { display:grid; grid-template-columns:44px minmax(0,760px); gap:15px; align-items:start; margin-bottom:28px; }
+    .num { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:var(--violet); color:#fff; font-weight:750; font-size:14px; }
+    h2 { margin:0; font-size:27px; letter-spacing:-.025em; }
+    .section-head p { grid-column:2; margin:-6px 0 0; color:var(--muted); }
+    .diagram { border:1px solid var(--line); background:#fff; padding:20px; overflow:auto; }
+    .diagram + .diagram { margin-top:20px; }
+    .mermaid { min-width: 720px; display:flex; justify-content:center; }
+    .principles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; margin-top:24px; background:var(--line); border:1px solid var(--line); }
+    .principle { padding:22px; background:#fff; }
+    .principle b { display:block; margin-bottom:8px; }
+    .principle p { margin:0; color:var(--muted); font-size:14px; }
+    .iteration-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    .iteration { position:relative; padding:24px; border:1px solid var(--line); background:#fff; min-height:240px; }
+    .iteration:nth-child(1){border-top:4px solid var(--ink)}
+    .iteration:nth-child(2){border-top:4px solid var(--violet)}
+    .iteration:nth-child(3){border-top:4px solid var(--teal)}
+    .iteration small { color:var(--muted); text-transform:uppercase; letter-spacing:.1em; font-weight:700; }
+    .iteration h3 { margin:10px 0 15px; font-size:21px; }
+    .iteration ul { padding-left:18px; margin:0; color:#535d77; font-size:14px; }
+    .iteration li { margin:8px 0; }
+    .split { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .note { padding:18px 20px; border-left:4px solid var(--teal); background:var(--teal-soft); color:#214943; font-size:14px; }
+    .note.warning { border-color:#d69524; background:#fff8e8; color:#59491d; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); }
+    table { border-collapse:collapse; width:100%; min-width:780px; font-size:13px; }
+    th,td { padding:14px 16px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { background:var(--soft); font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#5f6880; }
+    td:first-child { font-weight:700; color:var(--ink); }
+    footer { margin-left:var(--sidebar); padding:28px 54px 50px; color:var(--muted); font-size:13px; }
+    @media(max-width:920px){
+      aside{position:relative;width:auto;border-right:0;border-bottom:1px solid var(--line)}
+      nav{display:none}.legend{display:none}main,footer{margin-left:0}
+      header,section,footer{padding-left:24px;padding-right:24px}
+      .iteration-grid,.principles,.split{grid-template-columns:1fr}
+      .mermaid{min-width:650px}
+    }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="brand"><span class="brand-mark"><i></i><i></i><i></i><i></i></span>CSP Screener</div>
+    <nav><strong>On this page</strong>
+      <a href="#overview"><span>1</span>End-state overview</a>
+      <a href="#iterations"><span>2</span>Iteration roadmap</a>
+      <a href="#system"><span>3</span>System architecture</a>
+      <a href="#dashboard"><span>4</span>Dashboard sequence</a>
+      <a href="#ticker"><span>5</span>Ticker research</a>
+      <a href="#rag"><span>6</span>Advanced RAG</a>
+      <a href="#routing"><span>7</span>LangGraph routing</a>
+      <a href="#memory"><span>8</span>Memory model</a>
+      <a href="#observe"><span>9</span>Arize and safety</a>
+      <a href="#summary"><span>10</span>End-state summary</a>
+    </nav>
+    <div class="legend"><b>Diagram legend</b><p><i class="key"></i>User / agent flow</p><p><i class="key teal"></i>Data / evidence</p><p><i class="key gray"></i>Control boundary</p></div>
+  </aside>
+
+  <main>
+    <header id="overview">
+      <h1>CSP Screener — End-State Design</h1>
+      <p>A reviewable architecture for deterministic options screening, evidence-grounded research, persistent context, measurable quality, and research-only safety boundaries.</p>
+      <div class="status"><span>Approved design</span><span>Current and planned components marked</span><span>Architecture target—not task tracking</span></div>
+    </header>
+
+    <section id="iterations">
+      <div class="section-head"><div class="num">1</div><h2>Iteration roadmap</h2><p>Each iteration adds capability without moving financial calculations into the language model.</p></div>
+      <div class="iteration-grid">
+        <article class="iteration"><small>Iteration 1</small><h3>Deterministic CSP screening</h3><ul><li>Batched Alpaca market data</li><li>Explicit eligibility and scoring</li><li>Top-ten dashboard and ticker chain</li><li>Cache and scheduled refresh</li><li>No LLM required</li></ul></article>
+        <article class="iteration"><small>Iteration 2</small><h3>Grounded research agent</h3><ul><li>Intent classification and routing</li><li>Advanced company-evidence RAG</li><li>Comparisons and budget-aware discovery</li><li>Citations and structured answers</li><li>Arize traces and evaluations</li></ul></article>
+        <article class="iteration"><small>Iteration 3</small><h3>Profile, memory, and positions</h3><ul><li>User preferences and constraints</li><li>Session and durable memory</li><li>Portfolio-aware strategy routing</li><li>Alerts and monitored research</li><li>Explicit safety confirmations</li></ul></article>
+      </div>
+    </section>
+
+    <section id="system">
+      <div class="section-head"><div class="num">2</div><h2>System component architecture</h2><p>This end-state view distinguishes components already present from planned boundaries. “Data access” is a logical boundary, not a separately deployed data service.</p></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+  subgraph Experience[Experience layer]
+    UI[Dashboard · Screener · Research chat · Profile]
+  end
+  subgraph Application[Application layer]
+    API[HTTP API]
+    APP[Application service]
+    CACHE[(Latest screen snapshot)]
+    SCHED[Refresh scheduler]
+  end
+  subgraph Intelligence[Intelligence layer]
+    SCREEN[Deterministic screen workflow]
+    GRAPH[LangGraph research workflow]
+    RANK[Eligibility and ranking engine]
+    AGENT[LangChain model and tools]
+  end
+  subgraph Data[Data-access boundaries — not a standalone service]
+    PROVIDER[Market-data provider interface<br/>CURRENT: Alpaca SDK adapter]
+    MCP[Read-only Alpaca MCP server<br/>PLANNED]
+    RAG[Hybrid evidence retriever<br/>PLANNED]
+    VECTOR[(Vector index<br/>PLANNED)]
+    DOCS[(Document store<br/>PLANNED)]
+    PROFILE[(Profile and memory store<br/>PLANNED)]
+  end
+  subgraph External[External services]
+    ALPACA[Alpaca market data]
+    SOURCES[SEC · IR · transcripts · news]
+    LLM[Language model]
+    ARIZE[Arize]
+  end
+  UI --> API --> APP
+  APP --> SCREEN --> RANK
+  APP --> GRAPH --> AGENT
+  APP <--> CACHE
+  SCHED --> SCREEN
+  SCREEN --> PROVIDER
+  GRAPH --> PROVIDER
+  GRAPH --> RAG
+  GRAPH <--> PROFILE
+  PROVIDER --> MCP --> ALPACA
+  RAG <--> VECTOR
+  RAG <--> DOCS
+  SOURCES --> DOCS
+  AGENT --> LLM
+  APP -. traces .-> ARIZE
+  SCREEN -. traces .-> ARIZE
+  GRAPH -. traces .-> ARIZE
+  classDef planned fill:#fff,stroke:#8d96ab,stroke-width:1.5px,stroke-dasharray:6 4,color:#505a72;
+  classDef current fill:#f3f0ff,stroke:#7559e8,stroke-width:1.5px,color:#18213f;
+  class MCP,RAG,VECTOR,DOCS,PROFILE planned;
+  class UI,API,APP,CACHE,SCHED,SCREEN,GRAPH,RANK,AGENT,PROVIDER,ALPACA,LLM,ARIZE current;
+      </pre></div>
+      <div class="note"><strong>Current implementation:</strong> UI → HTTP API → application service → deterministic workflow/research graph → Alpaca SDK provider, plus an in-memory cache and Arize tracing. MCP, hybrid RAG storage, vector indexing, and durable profile/memory storage are end-state additions.</div>
+      <div class="principles"><div class="principle"><b>Deterministic authority</b><p>Eligibility, rankings, Greeks-derived values, affordability, and contract calculations are code controlled.</p></div><div class="principle"><b>Bounded intelligence</b><p>The model routes, retrieves, compares, explains, and abstains. It cannot trade or rewrite formulas.</p></div><div class="principle"><b>Evidence before synthesis</b><p>Material claims must point to market state or retrieved passages with visible source and freshness.</p></div></div>
+    </section>
+
+    <section id="dashboard">
+      <div class="section-head"><div class="num">3</div><h2>Dashboard refresh and read sequence</h2><p>One batched market-data request refreshes the universe. Browser reads normally use the last validated snapshot.</p></div>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant User
+  participant UI as Dashboard UI
+  participant API
+  participant App as Application service
+  participant Cache
+  participant Screen as Deterministic workflow
+  participant Provider as Alpaca provider/MCP
+  participant Arize
+  User->>UI: Open dashboard
+  UI->>API: GET /api/screen
+  API->>App: screen(force=false)
+  App->>Cache: Read latest validated snapshot
+  alt Fresh snapshot exists
+    Cache-->>App: Top ten + freshness metadata
+  else Missing or manual refresh
+    App->>Screen: Run configured universe
+    Screen->>Provider: One batched daily-bars request
+    Provider-->>Screen: Timestamped bars
+    Screen->>Screen: Validate · calculate · rank
+    Screen->>Cache: Atomically publish snapshot
+    Screen-->>App: Top ten + rejection counts
+    Screen-->>Arize: Latency · counts · cache · errors
+  end
+  App-->>API: Screen response
+  API-->>UI: Candidates + timestamps + warnings
+  UI-->>User: Render dashboard
+      </pre></div>
+      <div class="note">A failed refresh never replaces a known-good snapshot. The UI shows generated time, market-data time, cache state, and stale or partial-data warnings.</div>
+    </section>
+
+    <section id="ticker">
+      <div class="section-head"><div class="num">4</div><h2>Ticker options and research sequence</h2><p>The same ticker context supports deterministic option cards and evidence-grounded conversational research.</p></div>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant User
+  participant UI as Screener / Chat
+  participant API
+  participant Graph as LangGraph workflow
+  participant Market as Market-data provider
+  participant Calc as Deterministic calculations
+  participant RAG as Evidence retrieval
+  participant Model
+  User->>UI: Enter ticker and question
+  UI->>API: POST /api/chat {symbol, question}
+  API->>Graph: Validated research request
+  Graph->>Market: Latest trade + bounded option chain
+  Market-->>Graph: Spot · quotes · IV · Greeks · timestamps
+  Graph->>Calc: Rank affordable contracts
+  Calc-->>Graph: Structured candidates + reason codes
+  opt Fundamental, catalyst, risk, or news evidence needed
+    Graph->>RAG: Retrieve ticker-filtered evidence
+    RAG-->>Graph: Reranked passages + citations
+  end
+  Graph->>Model: Instructions + profile + market state + evidence
+  Model-->>Graph: Structured grounded answer
+  Graph->>Graph: Validate numbers · citations · safety
+  Graph-->>API: Answer + UI candidates + warnings
+  API-->>UI: Update chat and ticker cards
+      </pre></div>
+    </section>
+
+    <section id="rag">
+      <div class="section-head"><div class="num">5</div><h2>Advanced RAG: ingestion and retrieval</h2><p>The evidence system covers company fundamentals, catalysts, risks, guidance, regulation, competition, and recent developments—not only SEC metadata.</p></div>
+      <div class="split">
+        <div class="diagram"><pre class="mermaid">
+flowchart TB
+  S[SEC filings · earnings releases · IR decks · transcripts · regulatory updates · reputable news]
+  P[Parse and normalize]
+  C[Section-aware chunks]
+  M[Attach ticker · document type · section · date · URL · hash]
+  E[Embeddings]
+  V[(Vector index)]
+  K[(Keyword/BM25 index)]
+  D[(Canonical document store)]
+  S --> P --> C --> M
+  M --> E --> V
+  M --> K
+  M --> D
+        </pre></div>
+        <div class="diagram"><pre class="mermaid">
+flowchart TB
+  Q[User question + ticker + time horizon]
+  R[Rewrite and decompose query]
+  H[Hybrid semantic + keyword retrieval]
+  F[Metadata and freshness filters]
+  X[Cross-encoder reranking]
+  DD[Deduplicate stories and sections]
+  CP[Context pack with chunk IDs and citations]
+  A[Grounded answer]
+  Q --> R --> H --> F --> X --> DD --> CP --> A
+        </pre></div>
+      </div>
+      <div class="note warning">Prices, option chains, Greeks, ratios, earnings dates, and technical indicators remain structured tool data. They are not treated as vector-store facts or recalculated by the LLM.</div>
+    </section>
+
+    <section id="routing">
+      <div class="section-head"><div class="num">6</div><h2>LangGraph research routing</h2><p>A bounded graph selects known paths. Open-ended autonomous loops are not required for the target experience.</p></div>
+      <div class="diagram"><pre class="mermaid">
+stateDiagram-v2
+  [*] --> ValidateInput
+  ValidateInput --> Clarify: required context missing
+  ValidateInput --> ClassifyIntent: request valid
+  ClassifyIntent --> ExplainRanking: ranking explanation
+  ClassifyIntent --> ScreenTicker: ticker/options request
+  ClassifyIntent --> DiscoverCandidates: sector/budget/risk discovery
+  ClassifyIntent --> ResearchCompany: fundamentals/catalysts/risks/news
+  ClassifyIntent --> CompareCompanies: comparison request
+  ClassifyIntent --> GeneralEducation: unsupported investment horizon/education
+  ExplainRanking --> BuildContext
+  ScreenTicker --> BuildContext
+  DiscoverCandidates --> BuildContext
+  ResearchCompany --> RetrieveEvidence
+  CompareCompanies --> RetrieveEvidence
+  RetrieveEvidence --> BuildContext
+  BuildContext --> GenerateStructuredAnswer
+  GeneralEducation --> GenerateStructuredAnswer
+  GenerateStructuredAnswer --> ValidateAnswer
+  ValidateAnswer --> SafeResponse: valid and grounded
+  ValidateAnswer --> Abstain: missing evidence or invalid claims
+  SafeResponse --> [*]
+  Abstain --> [*]
+  Clarify --> [*]
+      </pre></div>
+    </section>
+
+    <section id="memory">
+      <div class="section-head"><div class="num">7</div><h2>Profile and memory model</h2><p>Memory is separated by purpose so the model receives only the context required for the current route.</p></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  U[User]
+  P[(Semantic profile<br/>budget · risk · timeline · sectors · constraints)]
+  W[(Working memory<br/>current question · recent turns · active screen)]
+  E[(Episodic memory<br/>prior research sessions · saved findings)]
+  PR[(Procedural memory<br/>preferred CSP rules · response format)]
+  R[Context policy]
+  G[LangGraph route]
+  U --> W
+  P --> R
+  W --> R
+  E --> R
+  PR --> R
+  R -->|minimum necessary context| G
+  G -->|explicit updates only| P
+  G -->|session checkpoint| W
+  G -->|saved research| E
+      </pre></div>
+      <div class="principles"><div class="principle"><b>Working</b><p>Short-lived context for the active conversation and screen.</p></div><div class="principle"><b>Durable</b><p>User-approved facts and saved research with retention and deletion controls.</p></div><div class="principle"><b>Scoped</b><p>Not every route receives every memory type; portfolio data is never included unnecessarily.</p></div></div>
+    </section>
+
+    <section id="observe">
+      <div class="section-head"><div class="num">8</div><h2>Arize observability, evaluations, and safety</h2><p>Tracing explains what happened; evaluations measure whether it was correct, grounded, efficient, and safe.</p></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph Runtime[Instrumented runtime]
+    REQ[Request] --> ROUTE[Route]
+    ROUTE --> TOOL[Tools / provider]
+    ROUTE --> RET[Retrieval]
+    ROUTE --> MODEL[Model]
+    MODEL --> VALIDATE[Response validation]
+  end
+  subgraph Arize[Arize]
+    TRACE[Trace explorer]
+    DATASET[Evaluation datasets]
+    EVAL[Evaluators]
+    DASH[Quality and latency dashboards]
+  end
+  Runtime -. OpenTelemetry / OpenInference .-> TRACE
+  TRACE --> DATASET --> EVAL --> DASH
+  EVAL -->|regression feedback| Runtime
+      </pre></div>
+      <div class="table-wrap"><table><thead><tr><th>Boundary</th><th>Target behavior</th><th>Measured signal</th></tr></thead><tbody>
+        <tr><td>Numerical integrity</td><td>All market numbers originate in deterministic state or provider responses.</td><td>Exact match, tolerance checks, unsupported-number rate</td></tr>
+        <tr><td>Retrieval quality</td><td>Relevant, fresh, non-duplicated evidence with precise citations.</td><td>Recall@k, citation precision, freshness, deduplication</td></tr>
+        <tr><td>Tool discipline</td><td>Correct read-only tool, valid arguments, no unnecessary calls.</td><td>Route accuracy, tool accuracy, call count, failure rate</td></tr>
+        <tr><td>Answer quality</td><td>Grounded, complete, concise, uncertain when evidence is incomplete.</td><td>Groundedness, relevance, completeness, abstention quality</td></tr>
+        <tr><td>Safety</td><td>No trading, guarantees, secret leakage, or hidden stale-data substitution.</td><td>Prohibited-call count, injection tests, redaction and stale-data checks</td></tr>
+        <tr><td>Efficiency</td><td>Cached deterministic results and bounded research steps.</td><td>Node latency, tokens, estimated cost, cache-hit rate, retries</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section id="summary">
+      <div class="section-head"><div class="num">9</div><h2>End-state implementation summary</h2><p>The final system remains modular: each layer can evolve without weakening deterministic finance or safety boundaries.</p></div>
+      <div class="principles">
+        <div class="principle"><b>User experience</b><p>One coherent dashboard, ticker screener, research panel, and profile experience.</p></div>
+        <div class="principle"><b>Financial core</b><p>Explainable rules, bounded provider calls, readable contracts, and reproducible results.</p></div>
+        <div class="principle"><b>Research intelligence</b><p>LangGraph routing, Advanced RAG, structured synthesis, citations, and follow-ups.</p></div>
+        <div class="principle"><b>Data foundation</b><p>Market state, canonical documents, vector and keyword indexes, profiles, and memory.</p></div>
+        <div class="principle"><b>Reliability</b><p>Validated snapshots, caching, freshness, failure isolation, telemetry, and regression evaluation.</p></div>
+        <div class="principle"><b>Trust and safety</b><p>Read-only capabilities, explicit uncertainty, privacy controls, and no autonomous trading.</p></div>
+      </div>
+    </section>
+  </main>
+  <footer>CSP Screener architecture review · End-state design with current and planned capabilities clearly distinguished.</footer>
+</body>
+</html>

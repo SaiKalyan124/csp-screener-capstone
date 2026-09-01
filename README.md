@@ -24,6 +24,11 @@ The application is research-only: it does not place trades or provide personaliz
 
 ## Architecture
 
+Review the approved end-state design in either format:
+
+- [GitHub-rendered architecture and Mermaid diagrams](docs/ARCHITECTURE.md)
+- [Single-page HTML architecture review](docs/architecture-review.html)
+
 ```text
 Iteration 1 — Deterministic CSP Screener
 Alpaca market data
