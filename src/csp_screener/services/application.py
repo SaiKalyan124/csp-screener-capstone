@@ -26,9 +26,14 @@ class ApplicationService:
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._stop_refresh = threading.Event()
-        self.agent = ResearchAgent(
-            self.agent_market_context, self.discover_agent_candidates
-        )
+        try:
+            self.agent: ResearchAgent | None = ResearchAgent(
+                self.agent_market_context, self.discover_agent_candidates
+            )
+        except RuntimeError:
+            # Deterministic screening remains usable when the optional model is
+            # not configured. API responses expose the research fallback.
+            self.agent = None
 
     def options(self, symbol: str) -> dict[str, object]:
         return self.workflow.options(symbol)
@@ -48,6 +53,8 @@ class ApplicationService:
             result = self.workflow.screen()
             if research:
                 try:
+                    if self.agent is None:
+                        raise RuntimeError("Research model is not configured")
                     result = {**result, **self.agent.classify_shortlist(result["candidates"])}
                 except Exception as exc:
                     result = {
@@ -66,6 +73,10 @@ class ApplicationService:
                 return {**result, "cache_status": "refreshed"}
 
     def research(self, symbol: str, question: str) -> dict[str, object]:
+        if self.agent is None:
+            raise RuntimeError(
+                "Research agent is unavailable; configure OPENAI_API_KEY to enable it."
+            )
         return self.agent.ask(symbol, question)
 
     def start_background_refresh(self) -> None:
