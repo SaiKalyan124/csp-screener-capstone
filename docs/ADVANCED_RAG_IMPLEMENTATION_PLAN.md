@@ -1,4 +1,4 @@
-# Advanced RAG and seven-person delivery plan
+# Advanced RAG implementation plan
 
 ## Evidence design
 
@@ -59,7 +59,7 @@ sequenceDiagram
     G-->>O: spans, tool calls, retrieval and eval metrics
 ```
 
-## Parallel team assignments
+## Parallel implementation workstreams
 
 | Owner | Component | First deliverable | Stable interface | Acceptance test |
 |---|---|---|---|---|

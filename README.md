@@ -293,4 +293,4 @@ Verify `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, and `ARIZE_PROJECT_NAME`, then run the
 - [Component workstreams](docs/COMPONENT_WORKSTREAMS.md)
 - [Architecture and sequence diagrams](docs/ARCHITECTURE_AND_SEQUENCE_DIAGRAMS.md)
 - [MCP-first capstone design](docs/MCP_FIRST_CAPSTONE_DESIGN.md)
-- [Advanced RAG and team work plan](docs/ADVANCED_RAG_AND_TEAM_WORKPLAN.md)
+- [Advanced RAG implementation plan](docs/ADVANCED_RAG_IMPLEMENTATION_PLAN.md)

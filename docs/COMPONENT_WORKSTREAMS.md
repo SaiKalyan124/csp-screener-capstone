@@ -1,4 +1,4 @@
-# Component architecture and team workstreams
+# Component architecture and development workstreams
 
 The application is split around stable interfaces so each workstream can change its own implementation without reaching into another component.
 

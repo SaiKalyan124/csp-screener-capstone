@@ -1,7 +1,7 @@
 # CSP Screener — MCP-First Capstone Design
 
 Status: proposed architecture  
-Audience: capstone team, instructors, developers, and demo reviewers  
+Audience: instructors, developers, and demo reviewers  
 Primary data integration: official Alpaca MCP Server  
 Orchestration: LangGraph and LangChain  
 Observability: Arize with OpenTelemetry and OpenInference
@@ -16,7 +16,7 @@ The design separates three responsibilities:
 2. **Deterministic code calculates and ranks.** Eligibility cuts, returns, volatility, liquidity, collateral, yields, and scores are tested Python functions. The LLM never calculates or changes these values.
 3. **The agent routes and explains.** LangChain and LangGraph let Kezzy interpret intent, select a bounded read-only tool or workflow, and explain stored results. The agent cannot trade.
 
-Arize captures the complete trace so the team can demonstrate which MCP tools ran, their latency, what deterministic nodes produced, how many model tokens were used, and whether the response remained grounded.
+Arize captures the complete trace so the project can demonstrate which MCP tools ran, their latency, what deterministic nodes produced, how many model tokens were used, and whether the response remained grounded.
 
 ## 2. Problem statement
 
