@@ -1,0 +1,640 @@
+<title>CSP Screener Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#EAEDEC;
+    --card:#F8F9F8;
+    --ink:#17232A;
+    --ink-soft:#55666D;
+    --line:#C9D2D2;
+    --accent:#A8752A;
+    --accent-soft:#F1E4CC;
+    --teal:#256F68;
+    --teal-soft:#E1EEEC;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#12191D;
+      --card:#182228;
+      --ink:#ECEFEE;
+      --ink-soft:#93A3A8;
+      --line:#2C3B40;
+      --accent:#D9A448;
+      --accent-soft:#2E2717;
+      --teal:#59C2B6;
+      --teal-soft:#132523;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#12191D;
+    --card:#182228;
+    --ink:#ECEFEE;
+    --ink-soft:#93A3A8;
+    --line:#2C3B40;
+    --accent:#D9A448;
+    --accent-soft:#2E2717;
+    --teal:#59C2B6;
+    --teal-soft:#132523;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Public Sans',-apple-system,'Segoe UI',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{
+    max-width:1080px;
+    margin:0 auto;
+    padding:56px 28px 96px;
+  }
+
+  .eyebrow{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:12px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin:0 0 10px;
+  }
+  h1{
+    font-family:'Source Serif 4',Georgia,serif;
+    font-weight:700;
+    font-size:clamp(32px,4.5vw,44px);
+    line-height:1.08;
+    margin:0 0 18px;
+    text-wrap:balance;
+  }
+  .intro{
+    max-width:70ch;
+    font-size:16.5px;
+    line-height:1.65;
+    color:var(--ink);
+  }
+  .intro strong{ font-weight:600; }
+  .intro + .intro{ margin-top:12px; }
+  code.inline{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:0.9em;
+    background:var(--card);
+    border:1px solid var(--line);
+    padding:1px 5px;
+    border-radius:4px;
+  }
+
+  header{
+    padding-bottom:36px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:36px;
+  }
+
+  /* ---- legend ---- */
+  .legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:22px 30px;
+    padding:20px 22px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:var(--card);
+    margin-bottom:56px;
+  }
+  .legend-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:150px;
+  }
+  .legend-item svg{ flex:none; }
+  .legend-item span{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+    line-height:1.35;
+  }
+
+  /* ---- milestone sections ---- */
+  section.milestone{
+    padding-top:44px;
+    border-top:1px solid var(--line);
+  }
+  section.milestone:first-of-type{ border-top:none; padding-top:0; }
+  section.milestone + section.milestone{ margin-top:8px; }
+
+  .m-head{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:10px 24px;
+    margin-bottom:6px;
+  }
+  h2{
+    font-family:'Source Serif 4',Georgia,serif;
+    font-weight:600;
+    font-size:26px;
+    margin:0;
+  }
+  .modality{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin:0 0 22px;
+    line-height:1.6;
+  }
+  .modality b{ color:var(--ink); font-weight:600; }
+
+  figure{ margin:0; }
+  .diagram-frame{
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:var(--card);
+    padding:18px;
+    overflow-x:auto;
+  }
+  .diagram-frame svg{
+    display:block;
+    width:100%;
+    height:auto;
+    min-width:640px;
+  }
+  figcaption{
+    font-size:13.5px;
+    color:var(--ink-soft);
+    margin-top:12px;
+    max-width:74ch;
+    line-height:1.55;
+  }
+
+  .stackline{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:11.5px;
+    color:var(--ink-soft);
+    margin-top:10px;
+  }
+  .stackline b{ color:var(--accent); font-weight:600; }
+
+  .tagrow{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:18px;
+  }
+  .tag{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:11.5px;
+    padding:5px 10px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    color:var(--ink-soft);
+  }
+  .tag.new{
+    border-color:var(--accent);
+    color:var(--accent);
+    background:var(--accent-soft);
+  }
+
+  .bridge-note{
+    margin:40px 0 44px;
+    padding:16px 18px;
+    border-left:3px solid var(--accent);
+    background:var(--accent-soft);
+    border-radius:0 8px 8px 0;
+    font-size:14px;
+    line-height:1.6;
+    color:var(--ink);
+  }
+
+  /* ---- svg node/edge shared classes ---- */
+  .node-rect{ fill:var(--card); stroke:var(--ink); stroke-width:1.75; }
+  .node-rect.ext{ stroke:var(--teal); }
+  .node-rect.headline{ stroke:var(--accent); stroke-width:2.25; }
+  .node-actor{ fill:var(--card); stroke:var(--ink); stroke-width:1.75; }
+  .ledger-line{ stroke:var(--ink-soft); stroke-width:1; }
+  .node-title{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:12px;
+    font-weight:600;
+    fill:var(--ink);
+    text-anchor:middle;
+  }
+  .node-sub{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:9.5px;
+    fill:var(--ink-soft);
+    text-anchor:middle;
+  }
+  .edge{ stroke:var(--ink-soft); stroke-width:1.5; fill:none; }
+  .edge.dashed{ stroke-dasharray:5 4; }
+  .edge.tool{ stroke:var(--accent); }
+  .edge-label{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:10px;
+    fill:var(--ink-soft);
+  }
+  .edge-label.tool{ fill:var(--accent); }
+  .runtag{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:12px;
+    fill:var(--ink-soft);
+  }
+
+  footer{
+    margin-top:60px;
+    padding-top:24px;
+    border-top:1px solid var(--line);
+    font-size:12.5px;
+    color:var(--ink-soft);
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Capstone · System Architecture</p>
+    <h1>CSP Screener Blueprint</h1>
+    <p class="intro">Three diagrams, one per build milestone, showing how the cash-secured put screener's
+    components connect and what gets added at each stage &mdash; from a conversational MVP, to an app that ranks
+    candidates, to an always-on platform with memory. <strong>Milestone 1 is Milestone 2 minus the deterministic
+    Score &amp; Rank engine</strong>; Milestone 3 is a <strong>separate application</strong> that adds persistent
+    memory and user profiles, reusing the Score &amp; Rank engine and the tool-calling pattern rather than
+    Milestone 2's codebase.</p>
+    <p class="intro">Chat and reasoning run as a <strong>LangGraph agent</strong> that invokes the
+    <strong>OpenAI API</strong> and issues typed tool calls &mdash; validated with <strong>Pydantic
+    <code class="inline">BaseModel</code></strong> schemas. The agent decides <em>what</em> to do and
+    <em>explains</em> the result, but it never does the numbers itself: <strong>scoring and ranking run in a
+    deterministic Score &amp; Rank engine</strong> (our own code plus finance APIs), not the LLM. In Milestone 2
+    the agent reasons over data pulled live from tools &mdash; the <strong>Yahoo Finance MCP</strong> for quotes,
+    fundamentals and options, the <strong>Alpaca / Robinhood MCP</strong> for live pricing, <strong>Tavily web
+    search</strong> as a fallback &mdash; and calls the Score &amp; Rank engine for any ranked comparison. Gold,
+    accent-colored arrows in the diagrams below mark those tool calls specifically.</p>
+  </header>
+
+  <div class="legend" role="group" aria-label="Diagram legend">
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <rect class="node-rect" x="3" y="6" width="40" height="18" rx="5"/>
+      </svg>
+      <span>Component<br>(your code)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <rect class="node-rect ext" x="3" y="6" width="40" height="18" rx="5"/>
+      </svg>
+      <span>External<br>service / MCP</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <rect class="node-rect" x="3" y="6" width="40" height="18" rx="5"/>
+        <line class="ledger-line" x1="8" y1="11" x2="38" y2="11"/>
+      </svg>
+      <span>Data store<br>(list, DB)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <rect class="node-rect headline" x="3" y="6" width="40" height="18" rx="5"/>
+      </svg>
+      <span>Headline capability<br>this milestone adds</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <circle class="node-actor" cx="23" cy="15" r="10"/>
+      </svg>
+      <span>Person</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <defs><marker id="lg-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--ink-soft)"/></marker></defs>
+        <line class="edge" x1="4" y1="15" x2="38" y2="15" marker-end="url(#lg-a)"/>
+      </svg>
+      <span>Direct call</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <defs><marker id="lg-c" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/></marker></defs>
+        <line class="edge tool" x1="4" y1="15" x2="38" y2="15" marker-end="url(#lg-c)"/>
+      </svg>
+      <span>LLM tool call<br>(Pydantic schema)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <defs><marker id="lg-b" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--ink-soft)"/></marker></defs>
+        <line class="edge dashed" x1="4" y1="15" x2="38" y2="15" marker-end="url(#lg-b)"/>
+      </svg>
+      <span>Scheduled /<br>async</span>
+    </div>
+  </div>
+
+  <!-- =========================== MILESTONE 1 =========================== -->
+  <section class="milestone">
+    <div class="m-head">
+      <p class="eyebrow" style="margin:0;">Milestone 1</p>
+    </div>
+    <h2>Conversational MVP</h2>
+    <p class="modality">Modality: <b>standalone web app</b> (e.g. Streamlit) &middot; any ticker &middot; chat handled by a <b>LangGraph agent</b> &middot; <b>data tools only &mdash; no ranking yet</b> &middot; session-only, no saved state</p>
+
+    <figure>
+      <div class="diagram-frame">
+        <svg viewBox="0 0 1000 600" role="img" aria-label="Milestone 1 is Milestone 2 without the Score and Rank engine: a user talks to a web app, which passes chat and parameters to a LangGraph agent. The agent invokes the OpenAI API to interpret the question, then issues Pydantic-schema tool calls: get_fundamentals and get_options against the Yahoo Finance MCP, get_price against the Alpaca or Robinhood MCP, and web_search against Tavily as a fallback. It answers about individual tickers and returns results and a rationale to the app. There is no ranking and no persistence at this stage.">
+          <defs>
+            <marker id="m1-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--ink-soft)"/>
+            </marker>
+            <marker id="m1-tool" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <circle class="node-actor" cx="300" cy="50" r="32"/>
+          <text class="node-title" x="300" y="55">User</text>
+
+          <rect class="node-rect headline" x="190" y="120" width="220" height="64" rx="8"/>
+          <text class="node-title" x="300" y="146">Web App</text>
+          <text class="node-sub" x="300" y="160">search &middot; chat &middot; inputs</text>
+
+          <rect class="node-rect ext" x="20" y="268" width="150" height="64" rx="8"/>
+          <text class="node-title" x="95" y="296">OpenAI API</text>
+          <text class="node-sub" x="95" y="310">LLM invocation</text>
+
+          <rect class="node-rect headline" x="190" y="268" width="220" height="64" rx="8"/>
+          <text class="node-title" x="300" y="294">LangGraph Agent</text>
+          <text class="node-sub" x="300" y="308">chat &rarr; tool calls</text>
+
+          <rect class="node-rect ext" x="40" y="450" width="230" height="70" rx="8"/>
+          <text class="node-title" x="155" y="480">Yahoo Finance MCP</text>
+          <text class="node-sub" x="155" y="494">quotes &middot; fundamentals</text>
+          <text class="node-sub" x="155" y="508">&middot; options</text>
+
+          <rect class="node-rect ext" x="320" y="450" width="230" height="70" rx="8"/>
+          <text class="node-title" x="435" y="480">Alpaca / Robinhood</text>
+          <text class="node-sub" x="435" y="494">MCP &middot; live pricing</text>
+
+          <rect class="node-rect ext" x="730" y="450" width="230" height="70" rx="8"/>
+          <text class="node-title" x="845" y="480">Tavily Web Search</text>
+          <text class="node-sub" x="845" y="494">fallback</text>
+
+          <!-- interactive spine -->
+          <line class="edge" x1="300" y1="82" x2="300" y2="116" marker-end="url(#m1-a)"/>
+          <text class="edge-label" x="308" y="102">search / ask</text>
+
+          <line class="edge" x1="280" y1="184" x2="280" y2="264" marker-end="url(#m1-a)"/>
+          <text class="edge-label" x="150" y="228">chat + params</text>
+
+          <line class="edge" x1="320" y1="264" x2="320" y2="188" marker-end="url(#m1-a)"/>
+          <text class="edge-label" x="328" y="228">results &amp; rationale</text>
+
+          <line class="edge" x1="190" y1="294" x2="172" y2="294" marker-end="url(#m1-a)"/>
+          <line class="edge" x1="172" y1="308" x2="190" y2="308" marker-end="url(#m1-a)"/>
+          <text class="edge-label" x="40" y="256">LLM invocation</text>
+
+          <!-- tool calls (gold) -->
+          <line class="edge tool" x1="240" y1="332" x2="170" y2="446" marker-end="url(#m1-tool)"/>
+          <text class="edge-label tool" x="110" y="392">get_fundamentals()</text>
+
+          <line class="edge tool" x1="310" y1="332" x2="400" y2="446" marker-end="url(#m1-tool)"/>
+          <text class="edge-label tool" x="360" y="392">get_price()</text>
+
+          <line class="edge tool" x1="400" y1="316" x2="800" y2="446" marker-end="url(#m1-tool)"/>
+          <text class="edge-label tool" x="600" y="372">web_search()</text>
+        </svg>
+      </div>
+      <figcaption>Milestone 1 is the whole Milestone 2 architecture <b>minus the Score &amp; Rank engine</b> &mdash; the conversational MVP. The LangGraph agent (gold arrows) invokes OpenAI to interpret a chat question, then issues the same Pydantic-validated data tool calls: <code class="inline">get_fundamentals()</code>/<code class="inline">get_options()</code> against the <b>Yahoo Finance MCP</b>, <code class="inline">get_price()</code> against the <b>Alpaca / Robinhood MCP</b>, and <code class="inline">web_search()</code> against <b>Tavily</b> as a fallback. It answers questions about individual tickers and options; <b>there is no ranking or &ldquo;top-N&rdquo; comparison yet</b> &mdash; that arrives in Milestone 2 as the deterministic <code class="inline">rank_candidates()</code> tool. Inputs live only for the session; persistence lands in Milestone 3.</figcaption>
+      <p class="stackline"><b>Stack:</b> LangGraph agent &middot; OpenAI API &middot; Pydantic <code class="inline">BaseModel</code> tool schemas &middot; Yahoo Finance MCP &middot; Alpaca/Robinhood MCP &middot; Tavily web search</p>
+    </figure>
+
+    <div class="tagrow">
+      <span class="tag new">any ticker</span>
+      <span class="tag new">single-ticker Q&amp;A</span>
+      <span class="tag new">Yahoo Finance MCP</span>
+      <span class="tag new">Tavily fallback</span>
+    </div>
+  </section>
+
+  <!-- =========================== MILESTONE 2 =========================== -->
+  <section class="milestone">
+    <div class="m-head">
+      <p class="eyebrow" style="margin:0;">Milestone 2</p>
+    </div>
+    <h2>Interactive Web App</h2>
+    <p class="modality">Modality: <b>standalone web app</b> (e.g. Streamlit) &middot; any ticker, not just the static list &middot; deterministic <b>Score &amp; Rank</b> &middot; chat handled by a <b>LangGraph agent</b> &middot; session-only, no saved state</p>
+
+    <figure>
+      <div class="diagram-frame">
+        <svg viewBox="0 0 1000 600" role="img" aria-label="Milestone 2: a user talks to a web app, which passes chat and parameters to a LangGraph agent. The agent invokes the OpenAI API to interpret the question, then issues Pydantic-schema tool calls: get_fundamentals and get_options against the Yahoo Finance MCP, get_price against the Alpaca or Robinhood MCP, web_search against Tavily as a fallback, and rank_candidates against a deterministic Score and Rank engine. The Score and Rank engine is our own code and does not use the LLM; it fetches KPIs from the finance APIs and ranks algorithmically, returning results and a rationale to the app. There is no persistence this milestone.">
+          <defs>
+            <marker id="m2-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--ink-soft)"/>
+            </marker>
+            <marker id="m2-tool" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <circle class="node-actor" cx="300" cy="50" r="32"/>
+          <text class="node-title" x="300" y="55">User</text>
+
+          <rect class="node-rect headline" x="190" y="120" width="220" height="64" rx="8"/>
+          <text class="node-title" x="300" y="146">Web App</text>
+          <text class="node-sub" x="300" y="160">search &middot; chat &middot; inputs</text>
+
+          <rect class="node-rect ext" x="20" y="268" width="150" height="64" rx="8"/>
+          <text class="node-title" x="95" y="296">OpenAI API</text>
+          <text class="node-sub" x="95" y="310">LLM invocation</text>
+
+          <rect class="node-rect headline" x="190" y="268" width="220" height="64" rx="8"/>
+          <text class="node-title" x="300" y="294">LangGraph Agent</text>
+          <text class="node-sub" x="300" y="308">chat &rarr; tool calls</text>
+
+          <rect class="node-rect headline" x="560" y="255" width="250" height="80" rx="8"/>
+          <text class="node-title" x="685" y="285">Score &amp; Rank Engine</text>
+          <text class="node-sub" x="685" y="300">deterministic KPI algorithm</text>
+          <text class="node-sub" x="685" y="314">our code &middot; no LLM</text>
+
+          <rect class="node-rect ext" x="40" y="450" width="230" height="70" rx="8"/>
+          <text class="node-title" x="155" y="480">Yahoo Finance MCP</text>
+          <text class="node-sub" x="155" y="494">quotes &middot; fundamentals</text>
+          <text class="node-sub" x="155" y="508">&middot; options</text>
+
+          <rect class="node-rect ext" x="320" y="450" width="230" height="70" rx="8"/>
+          <text class="node-title" x="435" y="480">Alpaca / Robinhood</text>
+          <text class="node-sub" x="435" y="494">MCP &middot; live pricing</text>
+
+          <rect class="node-rect ext" x="730" y="450" width="230" height="70" rx="8"/>
+          <text class="node-title" x="845" y="480">Tavily Web Search</text>
+          <text class="node-sub" x="845" y="494">fallback</text>
+
+          <!-- interactive spine -->
+          <line class="edge" x1="300" y1="82" x2="300" y2="116" marker-end="url(#m2-a)"/>
+          <text class="edge-label" x="308" y="102">search / ask</text>
+
+          <line class="edge" x1="280" y1="184" x2="280" y2="264" marker-end="url(#m2-a)"/>
+          <text class="edge-label" x="150" y="228">chat + params</text>
+
+          <line class="edge" x1="320" y1="264" x2="320" y2="188" marker-end="url(#m2-a)"/>
+          <text class="edge-label" x="328" y="228">results &amp; rationale</text>
+
+          <line class="edge" x1="190" y1="294" x2="172" y2="294" marker-end="url(#m2-a)"/>
+          <line class="edge" x1="172" y1="308" x2="190" y2="308" marker-end="url(#m2-a)"/>
+          <text class="edge-label" x="40" y="256">LLM invocation</text>
+
+          <!-- tool calls (gold) -->
+          <line class="edge tool" x1="240" y1="332" x2="170" y2="446" marker-end="url(#m2-tool)"/>
+          <text class="edge-label tool" x="110" y="392">get_fundamentals()</text>
+
+          <line class="edge tool" x1="310" y1="332" x2="400" y2="446" marker-end="url(#m2-tool)"/>
+          <text class="edge-label tool" x="360" y="392">get_price()</text>
+
+          <line class="edge tool" x1="410" y1="316" x2="800" y2="446" marker-end="url(#m2-tool)"/>
+          <text class="edge-label tool" x="580" y="372">web_search()</text>
+
+          <line class="edge tool" x1="410" y1="288" x2="556" y2="288" marker-end="url(#m2-tool)"/>
+          <text class="edge-label tool" x="424" y="280">rank_candidates()</text>
+
+          <!-- deterministic KPI fetch (grey) -->
+          <line class="edge" x1="620" y1="335" x2="475" y2="446" marker-end="url(#m2-a)"/>
+          <text class="edge-label" x="545" y="404">fetch KPIs</text>
+        </svg>
+      </div>
+      <figcaption>Ranking returns this milestone &mdash; but it is <b>deterministic, not the LLM</b>. The LangGraph agent (gold arrows) invokes OpenAI to interpret a chat question, then issues Pydantic-validated tool calls: <code class="inline">get_fundamentals()</code>/<code class="inline">get_options()</code> against the <b>Yahoo Finance MCP</b>, <code class="inline">get_price()</code> against the <b>Alpaca / Robinhood MCP</b>, and <code class="inline">web_search()</code> against <b>Tavily</b> as a fallback. For any &ldquo;rank these&rdquo; request it calls <code class="inline">rank_candidates()</code> on the <b>Score &amp; Rank engine</b> &mdash; our own code (the same ranker from Milestone 1) that pulls KPIs from the finance APIs and scores/orders them with a fixed algorithm, so the numbers never depend on the model. Persistence &mdash; saved watchlists, portfolios and profiles &mdash; is deferred to Milestone 3; Milestone 2 inputs live only for the session.</figcaption>
+      <p class="stackline"><b>Stack:</b> LangGraph agent &middot; OpenAI API &middot; Pydantic <code class="inline">BaseModel</code> tool schemas &middot; deterministic Score &amp; Rank engine &middot; Yahoo Finance MCP &middot; Alpaca/Robinhood MCP &middot; Tavily web search</p>
+    </figure>
+
+    <div class="tagrow">
+      <span class="tag new">any ticker</span>
+      <span class="tag new">budget / risk / timeline</span>
+      <span class="tag new">deterministic Score &amp; Rank</span>
+      <span class="tag new">Yahoo Finance MCP</span>
+      <span class="tag new">Tavily fallback</span>
+    </div>
+  </section>
+
+  <div class="bridge-note">
+    Milestone 3 is scoped as a <strong>separate application</strong> from Milestone 2 &mdash; a new frontend and a new backend
+    with real infrastructure behind it, not an extension of the Streamlit prototype. It reuses the deterministic
+    <strong>Score &amp; Rank</strong> engine and the LangGraph/OpenAI/MCP tool-calling pattern, and adds what Milestone 2
+    deliberately left out: <strong>persistent memory and user profiles</strong>.
+  </div>
+
+  <!-- =========================== MILESTONE 3 =========================== -->
+  <section class="milestone">
+    <div class="m-head">
+      <p class="eyebrow" style="margin:0;">Milestone 3</p>
+    </div>
+    <h2>Automated Platform</h2>
+    <p class="modality">Modality: <b>separate app, own backend</b> &middot; multi-turn <b>LangGraph agent</b> over OpenAI &middot; scheduled reports &middot; background ticker refresh &middot; <b>persistent memory &amp; user profiles</b></p>
+
+    <figure>
+      <div class="diagram-frame">
+        <svg viewBox="0 0 1160 560" role="img" aria-label="Milestone 3: a user's request flows through a web frontend and API backend into a LangGraph agent, which invokes the OpenAI API and issues Pydantic-schema tool calls to the deterministic Score and Rank engine and directly to the Alpaca or Robinhood MCP. Separately, a scheduler triggers scheduled ranking runs and ticker-universe refreshes on the same engine and MCP, storing results in a Memory and Profile store that holds user profiles, portfolios, watchlists and history and emails ranked reports back to the user.">
+          <defs>
+            <marker id="m3-a" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--ink-soft)"/>
+            </marker>
+            <marker id="m3-tool" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <circle class="node-actor" cx="330" cy="60" r="32"/>
+          <text class="node-title" x="330" y="65">User</text>
+
+          <rect class="node-rect" x="240" y="140" width="180" height="60" rx="8"/>
+          <text class="node-title" x="330" y="166">Web Frontend</text>
+          <text class="node-sub" x="330" y="180">separate app from M2</text>
+
+          <rect class="node-rect" x="240" y="260" width="180" height="60" rx="8"/>
+          <text class="node-title" x="330" y="295">API Backend</text>
+
+          <rect class="node-rect ext" x="20" y="380" width="180" height="60" rx="8"/>
+          <text class="node-title" x="110" y="406">OpenAI API</text>
+          <text class="node-sub" x="110" y="420">LLM invocation</text>
+
+          <rect class="node-rect headline" x="240" y="380" width="180" height="60" rx="8"/>
+          <text class="node-title" x="330" y="406">LangGraph</text>
+          <text class="node-sub" x="330" y="420">Agent</text>
+
+          <rect class="node-rect" x="590" y="380" width="180" height="60" rx="8"/>
+          <text class="node-title" x="680" y="406">Score &amp; Rank</text>
+          <text class="node-sub" x="680" y="420">deterministic engine</text>
+
+          <rect class="node-rect ext" x="590" y="470" width="180" height="60" rx="8"/>
+          <text class="node-title" x="680" y="492">Alpaca / Robinhood</text>
+          <text class="node-sub" x="680" y="506">MCP &middot; live pricing</text>
+
+          <rect class="node-rect headline" x="940" y="250" width="180" height="80" rx="8"/>
+          <line class="ledger-line" x1="950" y1="262" x2="1120" y2="262"/>
+          <text class="node-title" x="1030" y="288">Memory &amp; Profile</text>
+          <text class="node-sub" x="1030" y="303">user profiles &middot; portfolios</text>
+          <text class="node-sub" x="1030" y="316">watchlists &middot; history</text>
+
+          <rect class="node-rect headline" x="940" y="380" width="180" height="60" rx="8"/>
+          <text class="node-title" x="1030" y="406">Scheduler</text>
+          <text class="node-sub" x="1030" y="420">(cron)</text>
+
+          <!-- edges: interactive path -->
+          <line class="edge" x1="330" y1="92" x2="330" y2="136" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="338" y="118">asks a question</text>
+
+          <line class="edge" x1="330" y1="200" x2="330" y2="256" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="338" y="232">request</text>
+
+          <line class="edge" x1="330" y1="320" x2="330" y2="376" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="338" y="352">route query</text>
+
+          <line class="edge" x1="240" y1="410" x2="200" y2="410" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="30" y="368">LLM invocation</text>
+
+          <line class="edge tool" x1="420" y1="400" x2="586" y2="400" marker-end="url(#m3-tool)"/>
+          <text class="edge-label tool" x="432" y="392">tool call: rank_candidates()</text>
+
+          <line class="edge tool" x1="420" y1="422" x2="586" y2="494" marker-end="url(#m3-tool)"/>
+          <text class="edge-label tool" x="435" y="452">tool call: get_price()</text>
+
+          <!-- edges: shared / persistence -->
+          <line class="edge" x1="680" y1="440" x2="680" y2="466" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="688" y="456">fetch quotes</text>
+
+          <line class="edge" x1="770" y1="392" x2="936" y2="298" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="790" y="335">store results</text>
+
+          <line class="edge" x1="420" y1="290" x2="936" y2="290" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="560" y="282">read/write profile, portfolios &amp; history</text>
+
+          <line class="edge dashed" x1="1000" y1="250" x2="385" y2="86" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="670" y="150">emails ranked report</text>
+
+          <!-- edges: scheduled path -->
+          <line class="edge dashed" x1="936" y1="410" x2="774" y2="410" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="800" y="430">scheduled rank (nightly)</text>
+
+          <line class="edge dashed" x1="965" y1="376" x2="774" y2="504" marker-end="url(#m3-a)"/>
+          <text class="edge-label" x="800" y="470">refresh ticker universe</text>
+        </svg>
+      </div>
+      <figcaption><b>Memory &amp; user profiles are the headline of this milestone</b> (gold store, upper-right) &mdash; persistent state that Milestone 2 deliberately skipped: saved profiles, portfolios, watchlists and chat history. Three flows share the same core. The interactive path (grey, solid) routes a user's question to the LangGraph agent, which invokes OpenAI and then issues Pydantic-typed tool calls (gold) &mdash; <code class="inline">rank_candidates()</code> against the deterministic Score &amp; Rank engine or <code class="inline">get_price()</code> straight to the MCP; the agent reads and writes the user's profile and history along the way. The scheduled path (dashed) has the cron scheduler drive its own nightly ranking run and ticker universe refresh against the same engine and MCP, with results stored and emailed back out &mdash; no user request required.</figcaption>
+      <p class="stackline"><b>Stack:</b> LangGraph agent &middot; OpenAI API &middot; Pydantic <code class="inline">BaseModel</code> tool schemas &middot; deterministic Score &amp; Rank engine &middot; Alpaca/Robinhood MCP &middot; cron scheduler &middot; Memory &amp; Profile store (DB)</p>
+    </figure>
+
+    <div class="tagrow">
+      <span class="tag">IV Rank</span>
+      <span class="tag">Delta</span>
+      <span class="tag">Annualized Return</span>
+      <span class="tag new">persistent memory</span>
+      <span class="tag new">user profiles</span>
+      <span class="tag new">multi-turn follow-ups</span>
+      <span class="tag new">scheduled digest</span>
+    </div>
+  </section>
+
+  <footer>
+    Gold outlines mark the headline capability each milestone introduces; neutral outlines carry over from the
+    previous stage. Teal marks a call out to an external service or MCP server. Gold arrows are LLM-issued tool
+    calls with a Pydantic-validated schema; grey arrows are ordinary function calls; dashed arrows are
+    scheduler-driven or asynchronous.
+  </footer>
+
+</div>

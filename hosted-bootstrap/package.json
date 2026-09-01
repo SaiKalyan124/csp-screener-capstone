@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "dependencies": {
+    "@clack/prompts": "latest",
+    "@openai/create-sites": "0.3.0",
+    "npm": "latest"
+  }
+}

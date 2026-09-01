@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "csp-screener-capstone"
+version = "0.1.0"
+description = "Cash-secured-put screening and research capstone"
+requires-python = ">=3.11"
+dependencies = [
+  "alpaca-py>=0.42,<1",
+  "arize-otel>=0.10,<1",
+  "langchain>=1.0,<2",
+  "langchain-mcp-adapters>=0.1,<1",
+  "langchain-openai>=1.0,<2",
+  "langgraph>=1.0,<2",
+  "openinference-instrumentation-langchain>=0.1,<1",
+  "opentelemetry-sdk>=1.30,<2",
+  "python-dotenv>=1.0,<2",
+  "yfinance>=0.2,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+csp-benchmark = "csp_screener.cli:main"
+csp-demo = "csp_screener.server:main"
+csp-course-e2e = "csp_screener.course_e2e:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
