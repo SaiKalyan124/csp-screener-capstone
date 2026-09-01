@@ -86,7 +86,7 @@ The project is organized into independent workstreams with clear component bound
 | Frontend | Dashboard, screener, profile and chat UX | `web/` | API response contracts |
 | QA/deployment | Integration tests, fixtures, hosting and runbooks | `tests/`, `docs/`, deployment configuration | Release checks |
 
-Detailed ownership and dependency rules are in [docs/COMPONENT_WORKSTREAMS.md](docs/COMPONENT_WORKSTREAMS.md). The broader capstone design is in [docs/MCP_FIRST_CAPSTONE_DESIGN.md](docs/MCP_FIRST_CAPSTONE_DESIGN.md).
+Detailed flows and component boundaries are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
@@ -105,7 +105,7 @@ capstone/
 │   └── cli.py              # Alpaca latency benchmark CLI
 ├── web/                    # Vanilla HTML, CSS and JavaScript UI
 ├── tests/                  # Unit and workflow tests
-├── docs/                   # Architecture and implementation plans
+├── docs/                   # Architecture and component specifications
 ├── .env.example            # Safe configuration template
 └── pyproject.toml          # Python package and dependencies
 ```
@@ -290,7 +290,8 @@ Verify `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, and `ARIZE_PROJECT_NAME`, then run the
 
 ## Documentation
 
-- [Component workstreams](docs/COMPONENT_WORKSTREAMS.md)
-- [Architecture and sequence diagrams](docs/ARCHITECTURE_AND_SEQUENCE_DIAGRAMS.md)
-- [MCP-first capstone design](docs/MCP_FIRST_CAPSTONE_DESIGN.md)
-- [Advanced RAG implementation plan](docs/ADVANCED_RAG_IMPLEMENTATION_PLAN.md)
+- [Architecture and iteration flows](docs/ARCHITECTURE.md)
+- [Market data and screening](docs/components/MARKET_DATA_AND_SCREENING.md)
+- [Research agent and RAG](docs/components/RESEARCH_AGENT_AND_RAG.md)
+- [Application API and UI](docs/components/APPLICATION_API_AND_UI.md)
+- [Observability, evaluations, and safety](docs/components/OBSERVABILITY_EVALUATIONS_AND_SAFETY.md)
