@@ -149,7 +149,7 @@
       <div class="section-head"><div class="num">1</div><h2>Iteration roadmap</h2><p>Each iteration adds capability without moving financial calculations into the language model.</p></div>
       <div class="iteration-grid">
         <article class="iteration"><small>Iteration 1</small><h3>Deterministic CSP screening</h3><ul><li>Batched Alpaca market data</li><li>Explicit eligibility and scoring</li><li>Top-ten dashboard and ticker chain</li><li>Cache and scheduled refresh</li><li>No LLM required</li></ul></article>
-        <article class="iteration"><small>Iteration 2</small><h3>Grounded research agent</h3><ul><li>Intent classification and routing</li><li>Advanced company-evidence RAG</li><li>Comparisons and budget-aware discovery</li><li>Citations and structured answers</li><li>Arize traces and evaluations</li></ul></article>
+        <article class="iteration"><small>Iteration 2</small><h3>Grounded research agent</h3><ul><li>Top-10 research classification</li><li>Favorable · Watch · Avoid · Insufficient evidence</li><li>Advanced company-evidence RAG</li><li>Comparisons and budget-aware discovery</li><li>Citations, Arize traces, and evaluations</li></ul></article>
         <article class="iteration"><small>Iteration 3</small><h3>Profile, memory, and positions</h3><ul><li>User preferences and constraints</li><li>Session and durable memory</li><li>Portfolio-aware strategy routing</li><li>Alerts and monitored research</li><li>Explicit safety confirmations</li></ul></article>
       </div>
     </section>
@@ -210,11 +210,11 @@ flowchart TB
   class UI,API,APP,CACHE,SCHED,SCREEN,GRAPH,RANK,AGENT,PROVIDER,ALPACA,LLM,ARIZE current;
       </pre></div>
       <div class="note"><strong>Current implementation:</strong> UI → HTTP API → application service → deterministic workflow/research graph → Alpaca SDK provider, plus an in-memory cache and Arize tracing. MCP, hybrid RAG storage, vector indexing, and durable profile/memory storage are end-state additions.</div>
-      <div class="principles"><div class="principle"><b>Deterministic authority</b><p>Eligibility, rankings, Greeks-derived values, affordability, and contract calculations are code controlled.</p></div><div class="principle"><b>Bounded intelligence</b><p>The model routes, retrieves, compares, explains, and abstains. It cannot trade or rewrite formulas.</p></div><div class="principle"><b>Evidence before synthesis</b><p>Material claims must point to market state or retrieved passages with visible source and freshness.</p></div></div>
+      <div class="principles"><div class="principle"><b>Deterministic authority</b><p>Eligibility, scores, Greeks-derived values, affordability, and contract calculations are code controlled.</p></div><div class="principle"><b>Bounded intelligence</b><p>The model classifies the eligible Top 10, retrieves, compares, explains, and abstains. It cannot admit rejected candidates or rewrite formulas.</p></div><div class="principle"><b>Evidence before synthesis</b><p>Material claims must point to market state or retrieved passages with visible source and freshness.</p></div></div>
     </section>
 
     <section id="dashboard">
-      <div class="section-head"><div class="num">3</div><h2>Dashboard refresh and read sequence</h2><p>One batched market-data request refreshes the universe. Browser reads normally use the last validated snapshot.</p></div>
+      <div class="section-head"><div class="num">3</div><h2>Dashboard screening and research sequence</h2><p>Code establishes eligibility and scores first; a bounded research pass then classifies only the deterministic Top 10.</p></div>
       <div class="diagram"><pre class="mermaid">
 sequenceDiagram
   autonumber
@@ -225,27 +225,37 @@ sequenceDiagram
   participant Cache
   participant Screen as Deterministic workflow
   participant Provider as Alpaca provider/MCP
+  participant Research as Bounded research workflow
+  participant Evidence as Filings + news
+  participant Model as Structured LLM call
   participant Arize
   User->>UI: Open dashboard
   UI->>API: GET /api/screen
   API->>App: screen(force=false)
   App->>Cache: Read latest validated snapshot
   alt Fresh snapshot exists
-    Cache-->>App: Top ten + freshness metadata
+    Cache-->>App: Combined Top ten + research metadata
   else Missing or manual refresh
     App->>Screen: Run configured universe
     Screen->>Provider: One batched daily-bars request
     Provider-->>Screen: Timestamped bars
-    Screen->>Screen: Validate · calculate · rank
-    Screen->>Cache: Atomically publish snapshot
-    Screen-->>App: Top ten + rejection counts
+    Screen->>Screen: Hard-filter · calculate · rank
+    Screen-->>App: Deterministically eligible Top ten
+    App->>Research: Classify eligible shortlist
+    Research->>Evidence: Retrieve Top-10 evidence in parallel
+    Evidence-->>Research: Filing metadata + news
+    Research->>Model: One bounded structured call
+    Model-->>Research: Favorable · Watch · Avoid · Insufficient evidence
+    Research-->>App: Labels + reasons + allowed citations
+    App->>Cache: Atomically publish combined snapshot
     Screen-->>Arize: Latency · counts · cache · errors
+    Research-->>Arize: Retrieval · model · classification · fallback
   end
   App-->>API: Screen response
-  API-->>UI: Candidates + timestamps + warnings
+  API-->>UI: Scores + research labels + timestamps + warnings
   UI-->>User: Render dashboard
       </pre></div>
-      <div class="note">A failed refresh never replaces a known-good snapshot. The UI shows generated time, market-data time, cache state, and stale or partial-data warnings.</div>
+      <div class="note">If research retrieval or the model fails, the deterministic Top 10 remains available and is explicitly marked as a fallback. Research may group eligible results but cannot change scores or restore a rejected ticker.</div>
     </section>
 
     <section id="ticker">
@@ -266,7 +276,8 @@ sequenceDiagram
   API->>Graph: Validated research request
   Graph->>Market: Latest trade + bounded option chain
   Market-->>Graph: Spot · quotes · IV · Greeks · timestamps
-  Graph->>Calc: Rank affordable contracts
+  Graph->>Calc: Apply DTE · OTM · bid · spread · delta rules
+  Calc->>Calc: Rank by delta fit · spread quality · bid liquidity
   Calc-->>Graph: Structured candidates + reason codes
   opt Fundamental, catalyst, risk, or news evidence needed
     Graph->>RAG: Retrieve ticker-filtered evidence

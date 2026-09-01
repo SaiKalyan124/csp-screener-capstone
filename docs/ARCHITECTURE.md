@@ -22,7 +22,7 @@ flowchart TD
     I3 --- J[Guardrails, alerts, and confirmations]
 ```
 
-Iteration 1 owns all numerical calculations. Iteration 2 may explain and synthesize evidence but cannot replace deterministic eligibility or ranking. Iteration 3 adds personalization without changing those trust boundaries.
+Iteration 1 owns all numerical calculations. Iteration 2 classifies the deterministically eligible Top 10 as favorable, watch, avoid, or insufficient evidence using bounded retrieved research. It may change display order within that shortlist but cannot make an ineligible candidate eligible or rewrite a numerical score. Iteration 3 adds personalization without changing those trust boundaries.
 
 ## High-level component flow
 
@@ -58,16 +58,21 @@ sequenceDiagram
     UI->>API: GET /api/screen
     API->>Cache: Read latest snapshot
     alt fresh snapshot exists
-        Cache-->>API: Ranked candidates
+        Cache-->>API: Ranked and researched candidates
     else refresh required
         API->>Screen: Run deterministic screen
         Screen->>Alpaca: Batched daily bars request
         Alpaca-->>Screen: Bars for configured universe
         Screen->>Screen: Validate, calculate, rank
-        Screen->>Cache: Publish snapshot
-        Screen-->>API: Ranked candidates
+        Screen->>Screen: Hard-filter and deterministically rank Top 10
+        Screen->>API: Eligible Top 10
     end
-    API-->>UI: Top ten plus freshness metadata
+    API->>Workflow: Bounded research classification
+    Workflow->>Workflow: Retrieve evidence for Top 10 in parallel
+    Workflow->>Workflow: One structured LLM classification call
+    Workflow-->>API: Favorable / Watch / Avoid / Insufficient evidence
+    API->>Cache: Publish combined snapshot
+    API-->>UI: Deterministic scores, research labels, citations, freshness
 ```
 
 ## Ticker and research sequence
@@ -87,7 +92,8 @@ sequenceDiagram
     API->>Workflow: Validated request
     Workflow->>Alpaca: Latest trade and bounded option chain
     Alpaca-->>Workflow: Timestamped market data
-    Workflow->>Workflow: Deterministic calculations
+    Workflow->>Workflow: Apply DTE, OTM, bid, spread, and delta eligibility
+    Workflow->>Workflow: Rank by delta fit, spread quality, and bid liquidity
     opt evidence is required
         Workflow->>Retrieval: Retrieve company evidence
         Retrieval-->>Workflow: Reranked cited passages
@@ -104,6 +110,7 @@ sequenceDiagram
 - Trading and account-modification tools are outside the allowed capability set.
 - Secrets stay in server-side environment variables and are excluded from traces.
 - Every numerical claim must trace to deterministic state or provider output.
+- Dashboard research is a bounded classification layer after eligibility; failure preserves the deterministic Top 10 and is shown as a fallback.
 - Each component exposes a stable interface and remains independently testable.
 
 ## Component documents

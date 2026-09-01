@@ -27,7 +27,8 @@ class DemoHandler(SimpleHTTPRequestHandler):
         try:
             if parsed.path == "/api/screen":
                 force = query.get("refresh", ["0"])[0].lower() in {"1", "true", "yes"}
-                self._send_json(self.service.screen(force=force))
+                research = query.get("research", ["0"])[0].lower() in {"1", "true", "yes"}
+                self._send_json(self.service.screen(force=force, research=research))
                 return
             if parsed.path == "/api/options":
                 symbol = query.get("symbol", [""])[0].strip().upper()

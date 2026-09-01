@@ -20,7 +20,8 @@ The current adapter uses Alpaca's SDK. An Alpaca MCP implementation should satis
 2. Reject missing, stale, or insufficient histories.
 3. Calculate liquidity, three-month momentum, and realized volatility.
 4. Apply hard eligibility rules and score qualified symbols.
-5. Publish the top ten with score components, reason codes, and timestamps.
+5. Publish the deterministic top ten with score components, reason codes, and timestamps.
+6. Pass only that eligible shortlist to the bounded research classifier; the model cannot admit rejected symbols or change scores.
 
 ## Ticker option workflow
 
@@ -28,8 +29,10 @@ The current adapter uses Alpaca's SDK. An Alpaca MCP implementation should satis
 2. Fetch its latest trade to establish spot price.
 3. Fetch a bounded option chain for the configured DTE and strike window.
 4. Validate quotes, Greeks, timestamps, and liquidity.
-5. Calculate cash required, premium yield, break-even, distance from spot, and assignment exposure.
-6. Return five CSP candidates and five covered-call candidates.
+5. Apply hard contract rules: 20–35 DTE, OTM strategy direction, bid at least $0.10, spread at most 20%, and absolute delta from 0.15 to 0.40.
+6. Rank eligible contracts using 50% target-delta fit, 30% spread quality, and 20% bid liquidity.
+7. Calculate cash required, premium yield, break-even, distance from spot, and assignment exposure.
+8. Return the five highest-ranked eligible CSPs and covered calls. Distance from spot is descriptive and is not the selector.
 
 ## Trust and failure rules
 

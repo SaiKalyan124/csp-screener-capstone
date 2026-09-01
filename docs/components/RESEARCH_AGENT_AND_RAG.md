@@ -17,6 +17,18 @@ Supported routes include:
 - retrieve company fundamentals, catalysts, and risks;
 - handle follow-up requests such as selecting a safer strike.
 
+## Dashboard shortlist classification
+
+The dashboard uses a bounded research workflow after the deterministic screen:
+
+1. Code applies hard eligibility rules and produces the Top 10.
+2. Filing metadata and recent company news are retrieved for those symbols in parallel.
+3. One structured LLM call assigns `favorable`, `watch`, `avoid`, or `insufficient_evidence` with a concise reason and allowed citations.
+4. The UI may group or reorder the eligible shortlist by classification, while preserving every deterministic score.
+5. If retrieval or the model fails, the deterministic Top 10 remains available and the response is marked `fallback`.
+
+The LLM cannot introduce a new ticker, change market values, override hard eligibility, or promise performance.
+
 ## Evidence sources
 
 - SEC filings and material filing sections;

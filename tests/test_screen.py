@@ -80,10 +80,30 @@ def test_select_csp_and_covered_calls_returns_five_of_each():
     for contract_type in ("P", "C"):
         for strike in range(90, 111, 2):
             symbol = f"XYZ260918{contract_type}{strike * 1000:08d}"
-            chain[symbol] = snapshot(1.0, 1.1)
+            chain[symbol] = snapshot(1.0, 1.1, delta=-0.25 if contract_type == "P" else 0.25)
     expiry, rows = select_csp_and_covered_calls(chain, 100.0)
     assert expiry.isoformat() == "2026-09-18"
     assert [row["strategy"] for row in rows] == (
         ["Cash-secured put"] * 5 + ["Covered call"] * 5
     )
     assert all(row["moneyness"] == "OTM" for row in rows)
+    assert all(row["eligibility"] == "eligible" for row in rows)
+    assert all(row["rank_score"] >= 0 for row in rows)
+
+
+def test_contract_selection_filters_delta_and_ranks_quote_quality():
+    chain = {}
+    for contract_type in ("P", "C"):
+        strikes = range(88, 100, 2) if contract_type == "P" else range(102, 114, 2)
+        for index, strike in enumerate(strikes):
+            symbol = f"XYZ260918{contract_type}{strike * 1000:08d}"
+            chain[symbol] = snapshot(
+                1.0 + index * 0.05,
+                1.08 + index * 0.05,
+                delta=-0.25 if contract_type == "P" else 0.25,
+            )
+    chain["XYZ260918P00099000"] = snapshot(3.0, 3.1, delta=-0.65)
+    _, rows = select_csp_and_covered_calls(chain, 100.0)
+    assert len(rows) == 10
+    assert all(0.15 <= abs(row["delta"]) <= 0.40 for row in rows)
+    assert all(row["strike"] != 99.0 for row in rows)

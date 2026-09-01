@@ -30,6 +30,11 @@ class IterationOneConfig:
     dte_min: int = 20
     dte_max: int = 35
     contract_count: int = 5
+    min_option_bid: float = 0.10
+    max_option_spread_pct: float = 20.0
+    min_abs_delta: float = 0.15
+    max_abs_delta: float = 0.40
+    target_abs_delta: float = 0.25
 
 
 class IterationOneWorkflow:
@@ -82,7 +87,14 @@ class IterationOneWorkflow:
             strike_lte=round(spot * 1.25, 2),
         )
         expiry, rows = select_csp_and_covered_calls(
-            snapshots, spot, count=self.config.contract_count
+            snapshots,
+            spot,
+            count=self.config.contract_count,
+            min_bid=self.config.min_option_bid,
+            max_spread_pct=self.config.max_option_spread_pct,
+            min_abs_delta=self.config.min_abs_delta,
+            max_abs_delta=self.config.max_abs_delta,
+            target_abs_delta=self.config.target_abs_delta,
         )
         return {
             "iteration": 1,
@@ -95,4 +107,17 @@ class IterationOneWorkflow:
             "contracts": rows,
             "latency_ms": round((time.perf_counter() - started) * 1000),
             "source_count": len(snapshots),
+            "selection_method": (
+                "Eligible contracts ranked by delta fit (50%), spread quality "
+                "(30%), and bid liquidity (20%)"
+            ),
+            "eligibility_rules": {
+                "dte": [self.config.dte_min, self.config.dte_max],
+                "minimum_bid": self.config.min_option_bid,
+                "maximum_spread_pct": self.config.max_option_spread_pct,
+                "absolute_delta": [
+                    self.config.min_abs_delta,
+                    self.config.max_abs_delta,
+                ],
+            },
         }

@@ -40,7 +40,7 @@ function renderRow(row, index) {
   const iv = row.implied_volatility == null ? "—" : `${(row.implied_volatility * 100).toFixed(1)}%`;
   const delta = row.delta == null ? "—" : row.delta.toFixed(3);
   tr.innerHTML = `
-    <td><span class="money ${row.type.toLowerCase()}">${row.strategy}</span> <small>${row.distance_pct > 0 ? "+" : ""}${row.distance_pct}%</small></td>
+    <td><span class="money ${row.type.toLowerCase()}">${row.strategy}</span> <small>Score ${row.rank_score} · ${row.distance_pct > 0 ? "+" : ""}${row.distance_pct}%</small></td>
     <td class="contract"><strong></strong><small></small></td><td class="number">${number.format(row.strike)}</td>
     <td class="number">${number.format(row.bid)}</td><td class="number">${number.format(row.ask)}</td>
     <td class="number optional">${iv}</td><td class="number optional">${delta}</td>`;
@@ -55,16 +55,17 @@ function renderCandidate(candidate, index) {
   row.className = "candidate-row";
   row.setAttribute("aria-label", `Load ${candidate.symbol} option chain`);
   const returnClass = candidate.return_3m_pct >= 0 ? "candidate-positive" : "candidate-negative";
+  const classification = candidate.classification || "deterministic";
   row.innerHTML = `
     <span class="candidate-rank">${index + 1}</span>
     <span class="candidate-symbol"><strong></strong><small></small></span>
-    <span class="candidate-reason"><strong>Cash-secured-put fit</strong><span></span></span>
+    <span class="candidate-reason"><strong>${classification.replace("_", " ")} research</strong><span></span></span>
     <span class="candidate-metric liquidity"><strong>$${number.format(candidate.avg_dollar_volume_m)}M</strong><small>avg dollar volume</small></span>
     <span class="candidate-metric"><strong class="${returnClass}">${candidate.return_3m_pct > 0 ? "+" : ""}${candidate.return_3m_pct}%</strong><small>3-month return</small></span>
     <span class="candidate-score">${candidate.score}</span>`;
   row.querySelector(".candidate-symbol strong").textContent = candidate.symbol;
   row.querySelector(".candidate-symbol small").textContent = money.format(candidate.price);
-  row.querySelector(".candidate-reason span").textContent = candidate.reason;
+  row.querySelector(".candidate-reason span").textContent = candidate.research_reason || candidate.reason;
   row.addEventListener("click", async () => {
     showView("screener");
     input.value = candidate.symbol;
@@ -88,7 +89,9 @@ async function runStockScreen(force = false) {
   dashboardRun.textContent = "Screening…";
   status.textContent = "";
   try {
-    const response = await fetch(`/api/screen${force ? "?refresh=1" : ""}`);
+    const params = new URLSearchParams({ research: "1" });
+    if (force) params.set("refresh", "1");
+    const response = await fetch(`/api/screen?${params}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The stock screen could not be completed.");
     dashboardResults.replaceChildren(

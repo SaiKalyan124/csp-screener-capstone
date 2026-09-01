@@ -22,6 +22,7 @@ class ApplicationService:
             provider, IterationOneConfig(universe=settings.universe)
         )
         self._screen_cache: dict[str, object] | None = None
+        self._research_screen_cache: dict[str, object] | None = None
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._stop_refresh = threading.Event()
@@ -32,19 +33,36 @@ class ApplicationService:
     def options(self, symbol: str) -> dict[str, object]:
         return self.workflow.options(symbol)
 
-    def screen(self, *, force: bool = False) -> dict[str, object]:
+    def screen(self, *, force: bool = False, research: bool = False) -> dict[str, object]:
         with self._cache_lock:
-            if self._screen_cache is not None and not force:
-                return {**self._screen_cache, "cache_status": "hit"}
+            cached = self._research_screen_cache if research else self._screen_cache
+            if cached is not None and not force:
+                return {**cached, "cache_status": "hit"}
 
         # Cache hits never wait for a network refresh. Refresh misses are coalesced.
         with self._refresh_lock:
             with self._cache_lock:
-                if self._screen_cache is not None and not force:
-                    return {**self._screen_cache, "cache_status": "hit"}
+                cached = self._research_screen_cache if research else self._screen_cache
+                if cached is not None and not force:
+                    return {**cached, "cache_status": "hit"}
             result = self.workflow.screen()
+            if research:
+                try:
+                    result = {**result, **self.agent.classify_shortlist(result["candidates"])}
+                except Exception as exc:
+                    result = {
+                        **result,
+                        "research_status": "fallback",
+                        "research_method": "Deterministic ranking preserved",
+                        "research_warnings": [
+                            f"Research classification unavailable: {type(exc).__name__}"
+                        ],
+                    }
             with self._cache_lock:
-                self._screen_cache = result
+                if research:
+                    self._research_screen_cache = result
+                else:
+                    self._screen_cache = result
                 return {**result, "cache_status": "refreshed"}
 
     def research(self, symbol: str, question: str) -> dict[str, object]:
@@ -54,7 +72,7 @@ class ApplicationService:
         def loop() -> None:
             while not self._stop_refresh.is_set():
                 try:
-                    self.screen(force=True)
+                    self.screen(force=True, research=True)
                 except Exception as exc:
                     print(f"[demo] scheduled refresh failed: {type(exc).__name__}")
                 self._stop_refresh.wait(self.settings.refresh_seconds)

@@ -212,9 +212,21 @@ def select_demo_calls(
 
 
 def select_csp_and_covered_calls(
-    snapshots: dict[str, Any], spot: float, *, count: int = 5
+    snapshots: dict[str, Any],
+    spot: float,
+    *,
+    count: int = 5,
+    min_bid: float = 0.10,
+    max_spread_pct: float = 20.0,
+    min_abs_delta: float = 0.15,
+    max_abs_delta: float = 0.40,
+    target_abs_delta: float = 0.25,
 ) -> tuple[date, list[dict[str, Any]]]:
-    """Return five OTM cash-secured puts and five OTM covered calls."""
+    """Return the highest-ranked eligible CSPs and covered calls.
+
+    Distance from spot is descriptive only. Eligibility and ranking are based on
+    quote quality, liquidity and the configured delta band.
+    """
     grouped: dict[date, dict[str, list[dict[str, Any]]]] = {}
     for symbol, snapshot in snapshots.items():
         try:
@@ -226,9 +238,23 @@ def select_csp_and_covered_calls(
             continue
         bid = _number(getattr(quote, "bid_price", None))
         ask = _number(getattr(quote, "ask_price", None))
-        if bid is None or ask is None or bid <= 0 or ask <= bid:
+        if bid is None or ask is None or bid < min_bid or ask <= bid:
+            continue
+        midpoint = (bid + ask) / 2
+        spread_pct = (ask - bid) / midpoint * 100
+        if spread_pct > max_spread_pct:
             continue
         greeks = getattr(snapshot, "greeks", None)
+        delta = _number(getattr(greeks, "delta", None)) if greeks else None
+        if delta is None or not min_abs_delta <= abs(delta) <= max_abs_delta:
+            continue
+        premium_yield_pct = midpoint / strike * 100
+        delta_fit = max(0.0, 1 - abs(abs(delta) - target_abs_delta) / 0.15)
+        spread_fit = max(0.0, 1 - spread_pct / max_spread_pct)
+        liquidity_fit = min(1.0, bid / 2.0)
+        rank_score = round(
+            (delta_fit * 0.50 + spread_fit * 0.30 + liquidity_fit * 0.20) * 100
+        )
         row = {
             "symbol": symbol,
             "type": "Put" if contract_type == "P" else "Call",
@@ -238,8 +264,17 @@ def select_csp_and_covered_calls(
             "implied_volatility": _number(
                 getattr(snapshot, "implied_volatility", None)
             ),
-            "delta": _number(getattr(greeks, "delta", None)) if greeks else None,
+            "delta": delta,
             "distance_pct": round((strike - spot) / spot * 100, 2),
+            "midpoint": round(midpoint, 4),
+            "spread_pct": round(spread_pct, 2),
+            "premium_yield_pct": round(premium_yield_pct, 2),
+            "eligibility": "eligible",
+            "rank_score": rank_score,
+            "rank_reason": (
+                f"Delta within {min_abs_delta:.2f}–{max_abs_delta:.2f}; "
+                f"{spread_pct:.1f}% spread and ${bid:.2f} bid passed liquidity rules."
+            ),
         }
         bucket = grouped.setdefault(expiry, {"P": [], "C": []})
         if contract_type in bucket:
@@ -248,11 +283,11 @@ def select_csp_and_covered_calls(
     for expiry in sorted(grouped):
         puts = sorted(
             (row for row in grouped[expiry]["P"] if row["strike"] < spot),
-            key=lambda row: spot - row["strike"],
+            key=lambda row: (-row["rank_score"], -row["premium_yield_pct"], row["strike"]),
         )[:count]
         calls = sorted(
             (row for row in grouped[expiry]["C"] if row["strike"] > spot),
-            key=lambda row: row["strike"] - spot,
+            key=lambda row: (-row["rank_score"], -row["premium_yield_pct"], -row["strike"]),
         )[:count]
         if len(puts) == count and len(calls) == count:
             for row in puts:
@@ -262,4 +297,7 @@ def select_csp_and_covered_calls(
                 row["strategy"] = "Covered call"
                 row["moneyness"] = "OTM"
             return expiry, puts + calls
-    raise ValueError("No expiration has five quoted OTM puts and calls")
+    raise ValueError(
+        "No expiration has five eligible OTM puts and calls within the configured "
+        "delta, bid, and spread rules"
+    )
