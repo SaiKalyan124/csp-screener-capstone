@@ -13,6 +13,7 @@ const screenerNav = document.querySelector("#screener-nav");
 const dashboardRun = document.querySelector("#dashboard-run");
 const dashboardEmpty = document.querySelector("#dashboard-empty");
 const dashboardResults = document.querySelector("#dashboard-results");
+let dashboardResearchStatus = "pending";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const number = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -55,11 +56,16 @@ function renderCandidate(candidate, index) {
   row.className = "candidate-row";
   row.setAttribute("aria-label", `Load ${candidate.symbol} option chain`);
   const returnClass = candidate.return_3m_pct >= 0 ? "candidate-positive" : "candidate-negative";
-  const classification = candidate.classification || "deterministic";
+  const classification = candidate.classification || (
+    dashboardResearchStatus === "fallback" ? "research unavailable" : "deterministic"
+  );
+  const researchLabel = classification === "research unavailable"
+    ? classification
+    : `${classification.replace("_", " ")} research`;
   row.innerHTML = `
     <span class="candidate-rank">${index + 1}</span>
     <span class="candidate-symbol"><strong></strong><small></small></span>
-    <span class="candidate-reason"><strong>${classification.replace("_", " ")} research</strong><span></span></span>
+    <span class="candidate-reason"><strong>${researchLabel}</strong><span></span></span>
     <span class="candidate-metric liquidity"><strong>$${number.format(candidate.avg_dollar_volume_m)}M</strong><small>avg dollar volume</small></span>
     <span class="candidate-metric"><strong class="${returnClass}">${candidate.return_3m_pct > 0 ? "+" : ""}${candidate.return_3m_pct}%</strong><small>3-month return</small></span>
     <span class="candidate-score">${candidate.score}</span>`;
@@ -94,6 +100,7 @@ async function runStockScreen(force = false) {
     const response = await fetch(`/api/screen?${params}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The stock screen could not be completed.");
+    dashboardResearchStatus = data.research_status || "not_requested";
     dashboardResults.replaceChildren(
       ...data.candidates.slice(0, 10).map(renderCandidate)
     );
