@@ -52,10 +52,3 @@ Every retrieved chunk carries ticker, document type, publication/filed date, sec
 - Procedural memory: preferred CSP constraints and response style.
 
 Only working memory is needed initially. Durable memory belongs to Iteration 3 and requires retention, update, and deletion controls.
-
-## Definition of done
-
-- Golden prompts choose the correct route and required tools.
-- Retrieval meets agreed recall, citation precision, and freshness thresholds.
-- Numerical claims match deterministic context.
-- Unsupported claims abstain, conflicting evidence is visible, and follow-ups preserve the correct context.
