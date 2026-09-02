@@ -6,26 +6,38 @@
   <title>CSP Screener — End-State Design Preview</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script>
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: "base",
-      securityLevel: "loose",
-      themeVariables: {
-        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
-        primaryColor: "#f3f0ff",
-        primaryTextColor: "#18213f",
-        primaryBorderColor: "#7559e8",
-        secondaryColor: "#eafaf8",
-        secondaryTextColor: "#133e3a",
-        secondaryBorderColor: "#38a69a",
-        tertiaryColor: "#f7f8fc",
-        lineColor: "#7f88a3",
-        noteBkgColor: "#fff9df",
-        noteTextColor: "#4e4320"
-      },
-      flowchart: { curve: "basis", htmlLabels: true },
-      sequence: { useMaxWidth: true, actorMargin: 42, messageMargin: 30 }
-    });
+    (function waitForMermaid(attempt) {
+      if (!window.mermaid) {
+        if (attempt < 100) setTimeout(function () { waitForMermaid(attempt + 1); }, 50);
+        return;
+      }
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: "base",
+        securityLevel: "loose",
+        themeVariables: {
+          fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+          primaryColor: "#f3f0ff",
+          primaryTextColor: "#18213f",
+          primaryBorderColor: "#7559e8",
+          secondaryColor: "#eafaf8",
+          secondaryTextColor: "#133e3a",
+          secondaryBorderColor: "#38a69a",
+          tertiaryColor: "#f7f8fc",
+          lineColor: "#7f88a3",
+          noteBkgColor: "#fff9df",
+          noteTextColor: "#4e4320"
+        },
+        flowchart: { curve: "basis", htmlLabels: true },
+        sequence: { useMaxWidth: true, actorMargin: 42, messageMargin: 30 }
+      });
+      function renderDiagrams() { mermaid.run({ querySelector: ".mermaid" }); }
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", renderDiagrams, { once: true });
+      } else {
+        renderDiagrams();
+      }
+    })(0);
   </script>
   <style>
     :root {
