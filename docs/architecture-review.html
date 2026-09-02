@@ -244,12 +244,13 @@ sequenceDiagram
     Provider-->>Screen: Quotes · IV · Greeks · timestamps
     Screen->>Screen: Require five eligible CSPs + five eligible calls
     Screen-->>App: Fully eligible Top ten + cached chains
-    App->>Research: Classify eligible shortlist
-    Research->>Evidence: Retrieve Top-10 evidence in parallel
+    App->>Research: Invoke dashboard LangGraph
+    Research->>Evidence: Retrieve shortlist evidence in parallel
     Evidence-->>Research: Filing metadata + news
-    Research->>Model: One bounded structured call
+    Research->>Model: One LangChain structured-output call
     Model-->>Research: Favorable · Watch · Avoid · Insufficient evidence
-    Research-->>App: Labels + reasons + allowed citations
+    Research->>Research: Validate + run code-based evaluations
+    Research-->>App: Labels + citations + evaluation scores
     App->>Cache: Atomically publish combined snapshot
     Screen-->>Arize: Latency · counts · cache · errors
     Research-->>Arize: Retrieval · model · classification · fallback

@@ -69,10 +69,11 @@ sequenceDiagram
         Screen->>Screen: Require five eligible CSPs and five eligible calls
         Screen->>API: Fully eligible Top 10 with cached chains
     end
-    API->>Workflow: Bounded research classification
-    Workflow->>Workflow: Retrieve evidence for Top 10 in parallel
-    Workflow->>Workflow: One structured LLM classification call
-    Workflow-->>API: Favorable / Watch / Avoid / Insufficient evidence
+    API->>Workflow: Invoke dashboard LangGraph
+    Workflow->>Workflow: Retrieve evidence in parallel
+    Workflow->>Workflow: One LangChain structured LLM classification call
+    Workflow->>Workflow: Validate symbols, citations, scores, and eligibility
+    Workflow-->>API: Labels, citations, and evaluation scores
     API->>Cache: Publish combined snapshot
     API-->>UI: Deterministic scores, research labels, citations, freshness
 ```

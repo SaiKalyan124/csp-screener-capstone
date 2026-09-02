@@ -25,6 +25,14 @@ class ResearchState(TypedDict):
     discovery_requested: bool
 
 
+class ShortlistState(TypedDict):
+    candidates: list[dict[str, Any]]
+    evidence_by_symbol: dict[str, list[dict[str, Any]]]
+    raw_classifications: list[dict[str, Any]]
+    warnings: list[str]
+    output: dict[str, Any]
+
+
 class ResearchAnswer(BaseModel):
     answer: str = Field(description="Concise answer grounded only in supplied evidence")
     risk_level: str = Field(description="low, medium, high, or unknown")
@@ -69,6 +77,139 @@ def _candidate_evidence(symbol: str) -> list[dict[str, Any]]:
     except Exception:
         pass
     return rows[:5]
+
+
+def _retrieve_shortlist_evidence(state: ShortlistState) -> dict[str, Any]:
+    evidence_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    warnings = list(state.get("warnings", []))
+    bounded = state["candidates"][:10]
+    with ThreadPoolExecutor(max_workers=min(5, len(bounded) or 1)) as pool:
+        futures = {
+            pool.submit(_candidate_evidence, row["symbol"]): row["symbol"]
+            for row in bounded
+        }
+        for future in as_completed(futures):
+            symbol = futures[future]
+            try:
+                evidence_by_symbol[symbol] = future.result()
+            except Exception as exc:
+                evidence_by_symbol[symbol] = []
+                warnings.append(f"{symbol} research unavailable: {type(exc).__name__}")
+    return {"evidence_by_symbol": evidence_by_symbol, "warnings": warnings}
+
+
+def _classify_shortlist_with_llm(state: ShortlistState) -> dict[str, Any]:
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+
+    prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            "Classify each supplied, deterministically eligible CSP stock as favorable, "
+            "watch, avoid, or insufficient_evidence. Consider only material event and "
+            "company risk visible in the supplied headlines and filing metadata. Do not "
+            "predict returns, change numerical scores, or infer filing contents. Use "
+            "insufficient_evidence when support is weak. Return one result per symbol and "
+            "only cite supplied URLs.",
+        ),
+        ("human", "Deterministic shortlist: {candidates}\nEvidence by symbol: {evidence}"),
+    ])
+    model = ChatOpenAI(
+        model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"), temperature=0
+    ).with_structured_output(ShortlistClassification)
+    result = (prompt | model).invoke({
+        "candidates": state["candidates"][:10],
+        "evidence": state["evidence_by_symbol"],
+    })
+    return {
+        "raw_classifications": [item.model_dump() for item in result.candidates]
+    }
+
+
+def _validate_shortlist_classification(state: ShortlistState) -> dict[str, Any]:
+    bounded = state["candidates"][:10]
+    allowed_symbols = {row["symbol"] for row in bounded}
+    original_scores = {row["symbol"]: row["score"] for row in bounded}
+    allowed_urls = {
+        symbol: {str(item.get("url")) for item in rows if item.get("url")}
+        for symbol, rows in state["evidence_by_symbol"].items()
+    }
+    accepted: dict[str, dict[str, Any]] = {}
+    labels = {"favorable", "watch", "avoid", "insufficient_evidence"}
+    returned_citations = 0
+    accepted_citations = 0
+    for item in state["raw_classifications"]:
+        symbol = str(item.get("symbol", ""))
+        classification = str(item.get("classification", ""))
+        citations = [str(url) for url in item.get("cited_urls", [])]
+        returned_citations += len(citations)
+        if symbol not in allowed_symbols or classification not in labels:
+            continue
+        valid_citations = [
+            url for url in citations if url in allowed_urls.get(symbol, set())
+        ]
+        accepted_citations += len(valid_citations)
+        accepted[symbol] = {
+            "classification": classification,
+            "research_reason": str(item.get("reason", "")),
+            "research_citations": valid_citations,
+        }
+
+    enriched = []
+    for row in bounded:
+        research = accepted.get(row["symbol"], {
+            "classification": "insufficient_evidence",
+            "research_reason": "No supported research classification was returned.",
+            "research_citations": [],
+        })
+        enriched.append({**row, **research})
+    order = {"favorable": 0, "watch": 1, "insufficient_evidence": 2, "avoid": 3}
+    enriched = sorted(
+        enriched, key=lambda row: (order[row["classification"]], -row["score"])
+    )
+    evaluated_symbols = {row["symbol"] for row in enriched}
+    evaluations = {
+        "classification_coverage": round(len(accepted) / len(bounded), 3)
+        if bounded else 1.0,
+        "eligible_symbol_precision": round(
+            len(evaluated_symbols & allowed_symbols) / len(evaluated_symbols), 3
+        ) if evaluated_symbols else 1.0,
+        "citation_precision": round(accepted_citations / returned_citations, 3)
+        if returned_citations else 1.0,
+        "score_integrity": 1.0 if all(
+            row["score"] == original_scores[row["symbol"]] for row in enriched
+        ) else 0.0,
+        "contract_eligibility_integrity": 1.0 if all(
+            row.get("option_eligible") is True
+            and row.get("eligible_put_count", 0) >= 5
+            and row.get("eligible_call_count", 0) >= 5
+            for row in enriched
+        ) else 0.0,
+    }
+    return {"output": {
+        "candidates": enriched,
+        "research_status": "complete",
+        "research_warnings": state["warnings"],
+        "research_method": (
+            "LangGraph: parallel evidence retrieval → one LangChain structured "
+            "classification call → deterministic validation"
+        ),
+        "evaluation_scores": evaluations,
+    }}
+
+
+def build_shortlist_graph():
+    from langgraph.graph import END, START, StateGraph
+
+    graph = StateGraph(ShortlistState)
+    graph.add_node("retrieve_shortlist_evidence", _retrieve_shortlist_evidence)
+    graph.add_node("classify_shortlist_with_llm", _classify_shortlist_with_llm)
+    graph.add_node("validate_and_evaluate", _validate_shortlist_classification)
+    graph.add_edge(START, "retrieve_shortlist_evidence")
+    graph.add_edge("retrieve_shortlist_evidence", "classify_shortlist_with_llm")
+    graph.add_edge("classify_shortlist_with_llm", "validate_and_evaluate")
+    graph.add_edge("validate_and_evaluate", END)
+    return graph.compile()
 
 
 def _retrieve(state: ResearchState) -> dict[str, Any]:
@@ -188,6 +329,7 @@ class ResearchAgent:
         self.market_context_loader = market_context_loader
         self.discovery_loader = discovery_loader
         self.graph = build_research_graph(self._gather_market)
+        self.shortlist_graph = build_shortlist_graph()
 
     def classify_shortlist(self, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         """Research and classify an already-eligible deterministic shortlist.
@@ -195,79 +337,14 @@ class ResearchAgent:
         The model may attach a label and explanation, but cannot alter scores or
         make an ineligible symbol eligible.
         """
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_openai import ChatOpenAI
-
-        bounded = candidates[:10]
-        evidence_by_symbol: dict[str, list[dict[str, Any]]] = {}
-        warnings: list[str] = []
-        with ThreadPoolExecutor(max_workers=min(5, len(bounded) or 1)) as pool:
-            futures = {
-                pool.submit(_candidate_evidence, row["symbol"]): row["symbol"]
-                for row in bounded
-            }
-            for future in as_completed(futures):
-                symbol = futures[future]
-                try:
-                    evidence_by_symbol[symbol] = future.result()
-                except Exception as exc:
-                    evidence_by_symbol[symbol] = []
-                    warnings.append(f"{symbol} research unavailable: {type(exc).__name__}")
-
-        prompt = ChatPromptTemplate.from_messages([
-            (
-                "system",
-                "Classify each supplied, deterministically eligible CSP stock as favorable, "
-                "watch, avoid, or insufficient_evidence. Consider only material event and "
-                "company risk visible in the supplied headlines and filing metadata. Do not "
-                "predict returns, change numerical scores, or infer filing contents. Use "
-                "insufficient_evidence when support is weak. Return one result per symbol and "
-                "only cite supplied URLs.",
-            ),
-            ("human", "Deterministic shortlist: {candidates}\nEvidence by symbol: {evidence}"),
-        ])
-        model = ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"), temperature=0
-        ).with_structured_output(ShortlistClassification)
-        result = (prompt | model).invoke({
-            "candidates": bounded,
-            "evidence": evidence_by_symbol,
+        result = self.shortlist_graph.invoke({
+            "candidates": candidates[:10],
+            "evidence_by_symbol": {},
+            "raw_classifications": [],
+            "warnings": [],
+            "output": {},
         })
-        allowed_symbols = {row["symbol"] for row in bounded}
-        allowed_urls = {
-            symbol: {str(item.get("url")) for item in rows if item.get("url")}
-            for symbol, rows in evidence_by_symbol.items()
-        }
-        accepted: dict[str, dict[str, Any]] = {}
-        labels = {"favorable", "watch", "avoid", "insufficient_evidence"}
-        for item in result.candidates:
-            if item.symbol not in allowed_symbols or item.classification not in labels:
-                continue
-            accepted[item.symbol] = {
-                "classification": item.classification,
-                "research_reason": item.reason,
-                "research_citations": [
-                    url for url in item.cited_urls if url in allowed_urls[item.symbol]
-                ],
-            }
-        enriched = []
-        for row in bounded:
-            research = accepted.get(row["symbol"], {
-                "classification": "insufficient_evidence",
-                "research_reason": "No supported research classification was returned.",
-                "research_citations": [],
-            })
-            enriched.append({**row, **research})
-        order = {"favorable": 0, "watch": 1, "insufficient_evidence": 2, "avoid": 3}
-        return {
-            "candidates": sorted(
-                enriched,
-                key=lambda row: (order[row["classification"]], -row["score"]),
-            ),
-            "research_status": "complete",
-            "research_warnings": warnings,
-            "research_method": "One bounded LLM classification pass over deterministic Top 10",
-        }
+        return result["output"]
 
     def _gather_market(self, state: ResearchState) -> dict[str, Any]:
         contexts: list[dict[str, Any]] = []

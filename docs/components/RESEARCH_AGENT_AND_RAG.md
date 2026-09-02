@@ -22,10 +22,19 @@ Supported routes include:
 The dashboard uses a bounded research workflow after the deterministic screen:
 
 1. Code applies hard eligibility rules and produces the Top 10.
-2. Filing metadata and recent company news are retrieved for those symbols in parallel.
-3. One structured LLM call assigns `favorable`, `watch`, `avoid`, or `insufficient_evidence` with a concise reason and allowed citations.
-4. The UI may group or reorder the eligible shortlist by classification, while preserving every deterministic score.
-5. If retrieval or the model fails, the deterministic Top 10 remains available and the response is marked `fallback`.
+2. LangGraph retrieves filing metadata and recent company news for those symbols in parallel.
+3. A LangGraph classification node makes one LangChain structured-output LLM call assigning `favorable`, `watch`, `avoid`, or `insufficient_evidence`.
+4. A deterministic validation/evaluation node rejects unknown symbols and citations, preserves scores, and measures coverage and integrity.
+5. The UI may group or reorder the eligible shortlist by classification, while preserving every deterministic score.
+6. If retrieval or the model fails, the deterministic shortlist remains available and the response is marked `fallback`.
+
+```mermaid
+flowchart LR
+    Eligible[Fully eligible shortlist] --> Retrieve[LangGraph: parallel evidence retrieval]
+    Retrieve --> Classify[LangGraph: LangChain structured LLM call]
+    Classify --> Validate[LangGraph: validate + evaluate]
+    Validate --> Dashboard[Labels, citations, evaluation scores]
+```
 
 The LLM cannot introduce a new ticker, change market values, override hard eligibility, or promise performance.
 

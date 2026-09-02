@@ -1,6 +1,10 @@
 import pytest
 
-from csp_screener.iteration2 import ResearchAgent, _answer
+from csp_screener.iteration2 import (
+    ResearchAgent,
+    _answer,
+    _validate_shortlist_classification,
+)
 
 
 def test_agent_rejects_invalid_ticker_before_graph_call():
@@ -51,3 +55,41 @@ def test_agent_detects_top_three_capital_wording_as_discovery():
     assert ResearchAgent._needs_discovery(
         "give me top 3 csp trades for now i have capital of 50k"
     )
+
+
+def test_shortlist_evaluations_preserve_eligibility_scores_and_citations():
+    candidate = {
+        "symbol": "MU",
+        "score": 91,
+        "option_eligible": True,
+        "eligible_put_count": 5,
+        "eligible_call_count": 5,
+    }
+    result = _validate_shortlist_classification({
+        "candidates": [candidate],
+        "evidence_by_symbol": {
+            "MU": [{"url": "https://example.test/mu-filing"}]
+        },
+        "raw_classifications": [{
+            "symbol": "MU",
+            "classification": "watch",
+            "reason": "Material event requires review.",
+            "cited_urls": [
+                "https://example.test/mu-filing",
+                "https://invalid.test/invented",
+            ],
+        }],
+        "warnings": [],
+        "output": {},
+    })["output"]
+    assert result["candidates"][0]["score"] == 91
+    assert result["candidates"][0]["research_citations"] == [
+        "https://example.test/mu-filing"
+    ]
+    assert result["evaluation_scores"] == {
+        "classification_coverage": 1.0,
+        "eligible_symbol_precision": 1.0,
+        "citation_precision": 0.5,
+        "score_integrity": 1.0,
+        "contract_eligibility_integrity": 1.0,
+    }
