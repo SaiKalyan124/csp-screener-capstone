@@ -127,11 +127,17 @@ capstone/
 │   ├── server.py           # Thin HTTP transport
 │   └── cli.py              # Alpaca latency benchmark CLI
 ├── web/                    # Vanilla HTML, CSS and JavaScript UI
-├── tests/                  # Unit and workflow tests
+├── tests/
+│   ├── unit/              # Fast tests grouped by component boundary
+│   └── integration/       # Cross-component workflow tests
 ├── docs/                   # Architecture and component specifications
 ├── .env.example            # Safe configuration template
 └── pyproject.toml          # Python package and dependencies
 ```
+
+Tests mirror the application boundaries (`domain`, `agents`, `services`,
+`retrieval`, `configuration`, and `observability`) so contributors can work on
+one component without mixing its fixtures and assertions with another.
 
 ## Prerequisites
 

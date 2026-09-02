@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -8,6 +7,7 @@ from ..config import Settings
 from ..agents import ResearchAgent
 from ..providers import AlpacaMarketDataProvider
 from ..workflows import IterationOneConfig, IterationOneWorkflow
+from .parsing import parse_budget
 
 
 class ApplicationService:
@@ -138,23 +138,8 @@ class ApplicationService:
             "source": "Alpaca market data plus deterministic calculations",
         }
 
-    @staticmethod
-    def _budget(question: str) -> float | None:
-        match = re.search(
-            r"\$\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK]?)", question
-        ) or re.search(
-            r"(?:capital|budget)(?:\s+of|\s+is)?\s*\$?\s*"
-            r"([0-9][0-9,]*(?:\.\d+)?)\s*([kK]?)",
-            question,
-            re.IGNORECASE,
-        )
-        if not match:
-            return None
-        value = float(match.group(1).replace(",", ""))
-        return value * 1_000 if match.group(2).lower() == "k" else value
-
     def discover_agent_candidates(self, question: str) -> list[dict[str, object]]:
-        budget = self._budget(question)
+        budget = parse_budget(question)
         candidates = list(self.screen().get("candidates", []))
         if budget is not None:
             candidates = [
