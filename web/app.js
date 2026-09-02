@@ -179,7 +179,7 @@ const chatQuestion = document.querySelector("#chat-question");
 const chatMessages = document.querySelector("#chat-messages");
 
 function tickerFromQuestion(question) {
-  const ignored = new Set(["AI", "CSP", "DTE", "ETF", "ITM", "OTM", "SEC", "USD"]);
+  const ignored = new Set(["I", "AI", "CSP", "DTE", "ETF", "ITM", "OTM", "SEC", "USD"]);
   const prefixed = question.match(/^\s*\$?([A-Za-z][A-Za-z.\-]{0,9})\s*:/);
   const cashtag = question.match(/\$([A-Za-z][A-Za-z.\-]{0,9})\b/);
   const uppercase = question.match(/\b[A-Z][A-Z.\-]{0,9}\b/g) || [];
@@ -280,7 +280,7 @@ async function askKezzy(questionText) {
   }
 }
 
-document.querySelectorAll(".chat-actions > button").forEach((promptButton) => {
+document.querySelectorAll(".chat-hints button[data-question]").forEach((promptButton) => {
   promptButton.addEventListener("click", () => askKezzy(promptButton.dataset.question));
 });
 
@@ -294,6 +294,15 @@ chatForm.addEventListener("submit", (event) => {
 const appShell = document.querySelector(".app-shell");
 const sidebarToggle = document.querySelector("#sidebar-toggle");
 const chatToggle = document.querySelector("#chat-toggle");
+const chatHintsToggle = document.querySelector("#chat-hints-toggle");
+const chatHints = document.querySelector("#chat-hints");
+
+chatHintsToggle.addEventListener("click", () => {
+  const collapsed = !chatHints.hidden;
+  chatHints.hidden = collapsed;
+  chatHintsToggle.setAttribute("aria-expanded", String(!collapsed));
+  chatHintsToggle.querySelector("b").textContent = collapsed ? "+" : "−";
+});
 
 sidebarToggle.addEventListener("click", () => {
   const collapsed = appShell.classList.toggle("left-collapsed");
