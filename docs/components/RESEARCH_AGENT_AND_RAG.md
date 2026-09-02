@@ -1,4 +1,4 @@
-# Research agent and RAG
+# CSP Research Intelligence and RAG
 
 ## Responsibility
 
@@ -37,6 +37,14 @@ flowchart LR
 ```
 
 The LLM cannot introduce a new ticker, change market values, override hard eligibility, or promise performance.
+
+## Structured output contract
+
+Pydantic validates the LLM-facing `ResearchAnswer`, `CandidateClassification`, and
+`ShortlistClassification` schemas. Chat answers contain exactly three concise bullet
+points; each bullet is limited to 240 characters. Risk, citations, selected symbols,
+and UI candidates remain separate structured fields. Financial ranking itself stays
+in deterministic Python code and is not produced by the LLM.
 
 ## Evidence sources
 

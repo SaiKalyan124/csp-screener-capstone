@@ -36,7 +36,7 @@ Alpaca market data
    -> ranked dashboard and ticker option screen
    -> cache and scheduled refresh
 
-Iteration 2 — Grounded Research Agent
+Iteration 2 — CSP Research Intelligence
 Iteration 1 screen results
    + company evidence and news retrieval
    -> LangChain tools inside a LangGraph workflow

@@ -196,11 +196,24 @@ async function askKezzy(questionText) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Kezzy could not answer.");
-    answerMessage.textContent = data.answer;
+    answerMessage.textContent = "";
+    const bulletList = document.createElement("ul");
+    bulletList.className = "chat-bullets";
+    data.answer
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*[-•]\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .forEach((text) => {
+        const bullet = document.createElement("li");
+        bullet.textContent = text;
+        bulletList.append(bullet);
+      });
+    answerMessage.append(bulletList);
     const risk = document.createElement("span");
     risk.className = "risk-tag";
     risk.textContent = `Research risk: ${data.risk_level} · ${data.evidence_scope}`;
-    answerMessage.append(document.createElement("br"), risk);
+    answerMessage.append(risk);
     if (data.citations.length) {
       const citations = document.createElement("span");
       citations.className = "chat-citations";

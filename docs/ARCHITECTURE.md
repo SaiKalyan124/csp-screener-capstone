@@ -6,7 +6,7 @@ For a navigable single-page visual review, see [architecture-review.html](archit
 
 ```mermaid
 flowchart TD
-    I1[Iteration 1: deterministic screening] --> I2[Iteration 2: grounded research agent]
+    I1[Iteration 1: deterministic screening] --> I2[Iteration 2: CSP Research Intelligence]
     I2 --> I3[Iteration 3: profile, memory, and position-aware assistance]
 
     I1 --- A[Alpaca market data]

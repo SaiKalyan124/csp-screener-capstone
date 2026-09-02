@@ -4,7 +4,7 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Callable, TypedDict
+from typing import Annotated, Any, Callable, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +34,15 @@ class ShortlistState(TypedDict):
 
 
 class ResearchAnswer(BaseModel):
-    answer: str = Field(description="Concise answer grounded only in supplied evidence")
+    bullet_points: list[
+        Annotated[str, Field(min_length=1, max_length=240)]
+    ] = Field(
+        min_length=3,
+        max_length=3,
+        description=(
+            "Exactly three concise, non-redundant bullets grounded only in supplied evidence"
+        ),
+    )
     risk_level: str = Field(description="low, medium, high, or unknown")
     cited_urls: list[str] = Field(description="Only URLs present in supplied evidence")
     selected_symbol: str | None = Field(
@@ -233,7 +241,11 @@ def _answer(state: ResearchState) -> dict[str, Any]:
     allowed_urls = {str(row.get("url")) for row in state["evidence"] if row.get("url")}
     if not state["evidence"] and not state["market_context"]:
         return {
-            "answer": "I could not retrieve market or filing evidence, so I cannot provide a grounded research answer.",
+            "answer": (
+                "- I could not retrieve market or filing evidence for this request.\n"
+                "- I cannot provide a grounded CSP assessment without that context.\n"
+                "- Try again after market data or company evidence is available."
+            ),
             "risk_level": "unknown",
             "citations": [],
             "selected_symbol": None,
@@ -253,7 +265,8 @@ def _answer(state: ResearchState) -> dict[str, Any]:
                 "For puts, lower absolute delta and a lower strike are generally safer but offer "
                 "different premium; describe the tradeoff rather than declaring safety. Format "
                 "dates as Month day, year and contracts as 'TICKER · Month day, year · $strike put' "
-                "instead of displaying raw OCC symbols.",
+                "instead of displaying raw OCC symbols. Always return exactly three concise, "
+                "non-redundant bullet points. Keep every bullet under 240 characters.",
             ),
             (
                 "human",
@@ -293,7 +306,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         for url in cited
     ]
     return {
-        "answer": result.answer,
+        "answer": "\n".join(f"- {point.strip()}" for point in result.bullet_points),
         "risk_level": result.risk_level.lower()
         if result.risk_level.lower() in {"low", "medium", "high", "unknown"}
         else "unknown",

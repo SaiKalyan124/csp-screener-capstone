@@ -1,6 +1,7 @@
 import pytest
 
 from csp_screener.iteration2 import (
+    ResearchAnswer,
     ResearchAgent,
     _answer,
     _validate_shortlist_classification,
@@ -37,6 +38,19 @@ def test_answer_abstains_without_evidence_or_model_call():
     assert result["risk_level"] == "unknown"
     assert result["citations"] == []
     assert "cannot provide" in result["answer"]
+    assert len(result["answer"].splitlines()) == 3
+    assert all(line.startswith("- ") for line in result["answer"].splitlines())
+
+
+def test_research_answer_requires_exactly_three_concise_bullets():
+    with pytest.raises(ValueError):
+        ResearchAnswer(
+            bullet_points=["Only one bullet"],
+            risk_level="unknown",
+            cited_urls=[],
+            selected_symbol=None,
+            display_symbols=[],
+        )
 
 
 def test_agent_extracts_multiple_tickers_for_comparison():
