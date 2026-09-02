@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Annotated, Any, Callable, TypedDict
 
@@ -10,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .course_e2e import _normalize_filings
 from .observability import TracingStatus, setup_tracing
+from .providers import YahooFinanceMCPClient
 
 
 class ResearchState(TypedDict):
@@ -66,43 +66,31 @@ class ShortlistClassification(BaseModel):
 
 def _candidate_evidence(symbol: str) -> list[dict[str, Any]]:
     """Collect a small, bounded evidence packet for dashboard classification."""
-    import yfinance as yf
-
-    ticker = yf.Ticker(symbol)
-    rows = _normalize_filings(ticker.get_sec_filings(), limit=2)
-    try:
-        for item in (ticker.news or [])[:3]:
-            content = item.get("content", item)
-            url = (content.get("canonicalUrl") or {}).get("url") or content.get("link")
-            title = content.get("title")
-            if title and url:
-                rows.append({
-                    "type": "News",
-                    "title": title,
-                    "date": content.get("pubDate"),
-                    "url": url,
-                })
-    except Exception:
-        pass
-    return rows[:5]
+    packet = YahooFinanceMCPClient().company_evidence(
+        symbol, filing_limit=2, news_limit=3
+    )
+    return [*(packet.get("filings") or []), *(packet.get("news") or [])][:5]
 
 
 def _retrieve_shortlist_evidence(state: ShortlistState) -> dict[str, Any]:
     evidence_by_symbol: dict[str, list[dict[str, Any]]] = {}
     warnings = list(state.get("warnings", []))
     bounded = state["candidates"][:10]
-    with ThreadPoolExecutor(max_workers=min(5, len(bounded) or 1)) as pool:
-        futures = {
-            pool.submit(_candidate_evidence, row["symbol"]): row["symbol"]
-            for row in bounded
-        }
-        for future in as_completed(futures):
-            symbol = futures[future]
-            try:
-                evidence_by_symbol[symbol] = future.result()
-            except Exception as exc:
-                evidence_by_symbol[symbol] = []
-                warnings.append(f"{symbol} research unavailable: {type(exc).__name__}")
+    symbols = [row["symbol"] for row in bounded]
+    try:
+        result = YahooFinanceMCPClient().company_evidence_batch(
+            symbols, filing_limit=2, news_limit=3
+        )
+        for symbol in symbols:
+            packet = (result.get("evidence") or {}).get(symbol, {})
+            evidence_by_symbol[symbol] = [
+                *(packet.get("filings") or []), *(packet.get("news") or [])
+            ][:5]
+        for symbol, error in (result.get("errors") or {}).items():
+            warnings.append(f"{symbol} research unavailable: {error}")
+    except Exception as exc:
+        warnings.append(f"Yahoo MCP unavailable: {type(exc).__name__}")
+        evidence_by_symbol = {symbol: [] for symbol in symbols}
     return {"evidence_by_symbol": evidence_by_symbol, "warnings": warnings}
 
 
@@ -221,15 +209,16 @@ def build_shortlist_graph():
 
 
 def _retrieve(state: ResearchState) -> dict[str, Any]:
-    import yfinance as yf
-
     warnings: list[str] = []
     try:
         evidence_symbol = state["symbols"][0] if state["symbols"] else state["symbol"]
-        evidence = _normalize_filings(yf.Ticker(evidence_symbol).get_sec_filings(), limit=5)
+        packet = YahooFinanceMCPClient().company_evidence(
+            evidence_symbol, filing_limit=5, news_limit=0
+        )
+        evidence = _normalize_filings(packet.get("filings"), limit=5)
     except Exception as exc:
         evidence = []
-        warnings.append(f"Filing metadata retrieval failed: {type(exc).__name__}")
+        warnings.append(f"Yahoo MCP retrieval failed: {type(exc).__name__}")
     if not evidence:
         warnings.append("No filing metadata was available; the agent must abstain.")
     return {"evidence": evidence, "warnings": warnings}
@@ -482,7 +471,9 @@ class ResearchAgent:
             "iteration": 2,
             "agent": "Kezzy",
             "status": "live",
-            "evidence_scope": "Alpaca market data, deterministic screening, and Yahoo filing metadata",
+            "evidence_scope": (
+                "Alpaca market data, deterministic screening, and Yahoo evidence via MCP"
+            ),
             "tracing_mode": self.tracing.mode,
             "symbol": symbol,
             "answer": result["answer"],

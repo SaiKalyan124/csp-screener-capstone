@@ -204,7 +204,7 @@ async function askKezzy(questionText) {
   userMessage.textContent = `${symbol}: ${displayQuestion}`;
   const answerMessage = document.createElement("div");
   answerMessage.className = "assistant-message agent-response";
-  answerMessage.textContent = "Researching filing metadata…";
+  answerMessage.textContent = "Researching Yahoo evidence via MCP…";
   chatMessages.append(userMessage, answerMessage);
   chatMessages.scrollTop = chatMessages.scrollHeight;
   chatForm.querySelector("button").disabled = true;

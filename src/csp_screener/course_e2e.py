@@ -7,6 +7,7 @@ from typing import Any, TypedDict
 from dotenv import load_dotenv
 
 from .observability import setup_tracing
+from .providers import YahooFinanceMCPClient
 
 
 class FlowState(TypedDict):
@@ -48,19 +49,18 @@ def _normalize_filings(raw: Any, limit: int = 3) -> list[dict[str, Any]]:
 
 def _retrieve_filings(state: FlowState) -> dict[str, Any]:
     from opentelemetry import trace
-    import yfinance as yf
-
     tracer = trace.get_tracer("csp-screener-capstone")
     warnings: list[str] = []
     evidence: list[dict[str, Any]] = []
-    with tracer.start_as_current_span("retrieval.yahoo_sec_metadata") as span:
+    with tracer.start_as_current_span("mcp.yahoo.get_company_evidence") as span:
         span.set_attribute("ticker", state["symbol"])
         try:
-            evidence = _normalize_filings(
-                yf.Ticker(state["symbol"]).get_sec_filings()
+            packet = YahooFinanceMCPClient().company_evidence(
+                state["symbol"], filing_limit=3, news_limit=0
             )
+            evidence = _normalize_filings(packet.get("filings"))
         except Exception as exc:
-            warnings.append(f"Yahoo filing metadata unavailable: {type(exc).__name__}")
+            warnings.append(f"Yahoo MCP evidence unavailable: {type(exc).__name__}")
         span.set_attribute("retrieval.document_count", len(evidence))
     return {"evidence": evidence, "warnings": warnings}
 

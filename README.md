@@ -1,6 +1,6 @@
 # CSP Screener Capstone
 
-A capstone application for screening stocks and options for cash-secured-put (CSP) research. It combines deterministic eligibility and ranking calculations with Alpaca market data, an optional LangChain/LangGraph research agent, and Arize tracing.
+A capstone application for screening stocks and options for cash-secured-put (CSP) research. It combines deterministic eligibility and ranking calculations with Alpaca market data, Yahoo research tools exposed through a local MCP server, an optional LangChain/LangGraph research agent, and Arize tracing.
 
 The application is research-only: it does not place trades or provide personalized financial advice.
 
@@ -314,7 +314,7 @@ Reports are appended to `results/benchmarks.jsonl`. Compare minimum, median, and
 python -m csp_screener.course_e2e
 ```
 
-This exercises LangGraph routing, Yahoo SEC-filing metadata retrieval, LangChain invocation, and OpenTelemetry tracing. With Arize credentials, traces are exported to Arize. Without an OpenAI key, the smoke test uses a deterministic fake chat model.
+This exercises LangGraph routing, Yahoo MCP evidence retrieval, LangChain invocation, and OpenTelemetry tracing. With Arize credentials, traces are exported to Arize. Without an OpenAI key, the smoke test uses a deterministic fake chat model.
 
 ## Development workflow
 
