@@ -19,9 +19,11 @@ The current adapter uses Alpaca's SDK. An Alpaca MCP implementation should satis
 1. Request approximately 120 days of daily bars for the configured universe in one batch.
 2. Reject missing, stale, or insufficient histories.
 3. Calculate liquidity, three-month momentum, and realized volatility.
-4. Apply hard eligibility rules and score qualified symbols.
-5. Publish the deterministic top ten with score components, reason codes, and timestamps.
-6. Pass only that eligible shortlist to the bounded research classifier; the model cannot admit rejected symbols or change scores.
+4. Apply hard stock-level eligibility rules and score the qualified pool.
+5. Fetch bounded option chains for that pool and require five eligible CSPs plus five eligible covered calls under the same rules used by the ticker screener.
+6. Exclude symbols that lack sufficient eligible contracts; cache validated chains so dashboard clicks use the same snapshot.
+7. Publish up to ten fully eligible symbols with score components, contract counts, reason codes, and timestamps.
+8. Pass only that eligible shortlist to the bounded research classifier; the model cannot admit rejected symbols or change scores.
 
 ## Ticker option workflow
 

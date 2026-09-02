@@ -239,8 +239,11 @@ sequenceDiagram
     App->>Screen: Run configured universe
     Screen->>Provider: One batched daily-bars request
     Provider-->>Screen: Timestamped bars
-    Screen->>Screen: Hard-filter · calculate · rank
-    Screen-->>App: Deterministically eligible Top ten
+    Screen->>Screen: Hard-filter and rank stock pool
+    Screen->>Provider: Validate bounded chains for ranked pool
+    Provider-->>Screen: Quotes · IV · Greeks · timestamps
+    Screen->>Screen: Require five eligible CSPs + five eligible calls
+    Screen-->>App: Fully eligible Top ten + cached chains
     App->>Research: Classify eligible shortlist
     Research->>Evidence: Retrieve Top-10 evidence in parallel
     Evidence-->>Research: Filing metadata + news

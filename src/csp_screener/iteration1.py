@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Protocol
@@ -35,6 +37,7 @@ class IterationOneConfig:
     min_abs_delta: float = 0.15
     max_abs_delta: float = 0.40
     target_abs_delta: float = 0.25
+    stock_pool_size: int = 30
 
 
 class IterationOneWorkflow:
@@ -43,6 +46,8 @@ class IterationOneWorkflow:
     def __init__(self, provider: MarketDataProvider, config: IterationOneConfig):
         self.provider = provider
         self.config = config
+        self._option_cache: dict[str, dict[str, object]] = {}
+        self._option_cache_lock = threading.Lock()
 
     def screen(self) -> dict[str, object]:
         started = time.perf_counter()
@@ -50,7 +55,43 @@ class IterationOneWorkflow:
         bars = self.provider.daily_bars(
             list(self.config.universe), now - timedelta(days=120)
         )
-        candidates = rank_stock_candidates(bars, limit=10)
+        stock_candidates = rank_stock_candidates(
+            bars, limit=min(len(self.config.universe), self.config.stock_pool_size)
+        )
+        with self._option_cache_lock:
+            self._option_cache = {}
+        eligible_by_symbol: dict[str, dict[str, object]] = {}
+        rejected_options: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=min(5, len(stock_candidates) or 1)) as pool:
+            futures = {
+                pool.submit(self.options, candidate.symbol): candidate.symbol
+                for candidate in stock_candidates
+            }
+            for future in as_completed(futures):
+                symbol = futures[future]
+                try:
+                    eligible_by_symbol[symbol] = future.result()
+                except Exception as exc:
+                    rejected_options[symbol] = str(exc)
+
+        candidates: list[dict[str, object]] = []
+        for candidate in stock_candidates:
+            option_result = eligible_by_symbol.get(candidate.symbol)
+            if option_result is None:
+                continue
+            contracts = list(option_result["contracts"])
+            puts = [row for row in contracts if row["strategy"] == "Cash-secured put"]
+            calls = [row for row in contracts if row["strategy"] == "Covered call"]
+            candidates.append({
+                **candidate.to_dict(),
+                "option_eligible": True,
+                "eligible_put_count": len(puts),
+                "eligible_call_count": len(calls),
+                "best_csp_score": max(row["rank_score"] for row in puts),
+                "option_expiration": option_result["expiration"],
+            })
+            if len(candidates) == 10:
+                break
         data_as_of = max(
             (
                 getattr(bar, "timestamp", None)
@@ -66,13 +107,23 @@ class IterationOneWorkflow:
             "generated_at": now.isoformat(),
             "data_as_of": data_as_of.isoformat() if data_as_of else None,
             "universe_count": len(self.config.universe),
+            "stock_qualified_count": len(stock_candidates),
             "qualified_count": len(candidates),
+            "option_rejected_count": len(rejected_options),
             "latency_ms": round((time.perf_counter() - started) * 1000),
-            "method": "40% liquidity · 35% 3-month momentum · 25% realized volatility",
-            "candidates": [candidate.to_dict() for candidate in candidates],
+            "method": (
+                "Stock eligibility and score, followed by required validation of "
+                "five CSPs and five covered calls under the configured contract rules"
+            ),
+            "candidates": candidates,
         }
 
     def options(self, symbol: str) -> dict[str, object]:
+        symbol = symbol.strip().upper()
+        with self._option_cache_lock:
+            cached = self._option_cache.get(symbol)
+        if cached is not None:
+            return cached
         started = time.perf_counter()
         trade = self.provider.latest_trade(symbol)
         if trade is None:
@@ -96,7 +147,7 @@ class IterationOneWorkflow:
             max_abs_delta=self.config.max_abs_delta,
             target_abs_delta=self.config.target_abs_delta,
         )
-        return {
+        result: dict[str, object] = {
             "iteration": 1,
             "workflow": "python-deterministic",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -121,3 +172,6 @@ class IterationOneWorkflow:
                 ],
             },
         }
+        with self._option_cache_lock:
+            self._option_cache[symbol] = result
+        return result

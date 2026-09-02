@@ -107,6 +107,7 @@ async function runStockScreen(force = false) {
     dashboardEmpty.hidden = true;
     dashboardResults.hidden = false;
     document.querySelector("#dashboard-qualified").textContent = `${data.qualified_count} stocks`;
+    document.querySelector("#dashboard-top-count").textContent = `${data.candidates.length} candidates`;
     document.querySelector("#dashboard-updated").textContent = new Date(data.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     document.querySelector("#dashboard-latency").textContent = `${data.cache_status} · ${data.latency_ms} ms`;
   } catch (error) {

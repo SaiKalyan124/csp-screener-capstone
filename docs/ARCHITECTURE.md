@@ -64,8 +64,10 @@ sequenceDiagram
         Screen->>Alpaca: Batched daily bars request
         Alpaca-->>Screen: Bars for configured universe
         Screen->>Screen: Validate, calculate, rank
-        Screen->>Screen: Hard-filter and deterministically rank Top 10
-        Screen->>API: Eligible Top 10
+        Screen->>Screen: Hard-filter and rank the stock pool
+        Screen->>Alpaca: Validate bounded option chains for ranked pool
+        Screen->>Screen: Require five eligible CSPs and five eligible calls
+        Screen->>API: Fully eligible Top 10 with cached chains
     end
     API->>Workflow: Bounded research classification
     Workflow->>Workflow: Retrieve evidence for Top 10 in parallel

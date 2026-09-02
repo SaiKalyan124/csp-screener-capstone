@@ -57,3 +57,19 @@ def test_iteration_one_options_returns_five_per_strategy():
     assert [row["strategy"] for row in result["contracts"]] == (
         ["Cash-secured put"] * 5 + ["Covered call"] * 5
     )
+
+
+def test_dashboard_excludes_stock_without_required_option_contracts():
+    class PartiallyEligibleProvider(FakeProvider):
+        def option_chain(self, symbol, **kwargs):
+            chain = super().option_chain(symbol, **kwargs)
+            return chain if symbol == "MU" else {}
+
+    workflow = IterationOneWorkflow(
+        PartiallyEligibleProvider(), IterationOneConfig(universe=("MU", "BKNG"))
+    )
+    result = workflow.screen()
+    assert [row["symbol"] for row in result["candidates"]] == ["MU"]
+    assert result["candidates"][0]["eligible_put_count"] == 5
+    assert result["candidates"][0]["eligible_call_count"] == 5
+    assert result["option_rejected_count"] == 1
