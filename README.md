@@ -14,6 +14,24 @@ The application is research-only: it does not place trades or provide personaliz
 - Exports LangChain/LangGraph traces to Arize when Arize credentials are configured.
 - Includes a CLI for measuring Alpaca stock and option-data latency.
 
+## Demo screenshots
+
+### Dashboard: eligible CSP shortlist
+
+![Dashboard showing the eligible CSP shortlist and research classifications](docs/screenshots/dashboard-flow.png)
+
+### Ticker screener: ranked option contracts
+
+![Ticker screener showing ranked cash-secured puts and covered calls](docs/screenshots/ticker-screener-flow.png)
+
+### Arize: workflow traces
+
+![Arize project trace view for the research workflow](docs/screenshots/arize-traces.png)
+
+### LangGraph: bounded research routing
+
+![LangGraph routing diagram for research and follow-up questions](docs/screenshots/langgraph-routing.png)
+
 ## Current iterations
 
 | Iteration | Status | Scope |
