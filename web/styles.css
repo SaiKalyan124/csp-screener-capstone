@@ -16,3 +16,4 @@
 .agent-response{padding:12px;border-radius:12px;font-size:11px;line-height:1.45}.agent-response .chat-citations{margin-bottom:8px}.agent-response .chat-candidate-card{background:#fff;color:var(--ink)}
 button.chat-candidate-card{height:auto!important;min-height:54px!important;padding:8px!important;background:#fff!important;color:var(--ink)!important;box-shadow:none!important}button.chat-candidate-card:hover{background:#faf7ff!important}.chat-candidate-card strong,.chat-candidate-card span{display:block}.chat-candidate-card strong{margin-bottom:3px}
 html,body{max-width:100%;overflow-x:hidden}.app-shell{max-width:100vw}
+.content-grid{grid-template-columns:minmax(0,1fr)}
