@@ -123,7 +123,7 @@ def _classify_shortlist_with_llm(state: ShortlistState) -> dict[str, Any]:
         ("human", "Deterministic shortlist: {candidates}\nEvidence by symbol: {evidence}"),
     ])
     model = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"), temperature=0
+        model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), temperature=0
     ).with_structured_output(ShortlistClassification)
     result = (prompt | model).invoke({
         "candidates": state["candidates"][:10],
@@ -279,7 +279,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
     from langchain_openai import ChatOpenAI
 
     model = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"), temperature=0
+        model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), temperature=0
     ).with_structured_output(ResearchAnswer)
     result = (prompt | model).invoke(
         {

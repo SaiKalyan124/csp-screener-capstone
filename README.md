@@ -6,8 +6,8 @@ The application is research-only: it does not place trades or provide personaliz
 
 ## What the demo does
 
-- Maintains a dashboard of ten CSP-eligible candidates from a configured universe.
-- Screens any ticker and displays five cash-secured puts and five covered calls near the current stock price.
+- Maintains a dashboard of up to ten fully CSP-eligible candidates from a configured universe.
+- Screens any ticker and displays the five highest-ranked eligible cash-secured puts and covered calls.
 - Calculates affordability, strike distance, premium yield, volatility, liquidity, and other ranking inputs deterministically.
 - Lets the research agent answer ticker, comparison, budget, risk, and follow-up questions using current screen results as grounded context.
 - Refreshes dashboard data in the background and caches the latest result.
@@ -24,7 +24,7 @@ The application is research-only: it does not place trades or provide personaliz
 
 ## Architecture
 
-Review the approved end-state design in either format:
+Review the pending end-state design in either format:
 
 - [GitHub-rendered architecture and Mermaid diagrams](docs/ARCHITECTURE.md)
 - [Single-page HTML architecture review](docs/architecture-review.html)
@@ -123,13 +123,27 @@ capstone/
 - Optional: an OpenAI API key for live agent responses
 - Optional: Arize space/API credentials for hosted tracing
 
+## Get the API credentials
+
+Only Alpaca is required for the deterministic dashboard and ticker screener. OpenAI
+enables CSP Research Intelligence, and Arize enables hosted traces.
+
+| Service | Required? | Where to get it | Environment variables |
+|---|---|---|---|
+| Alpaca Market Data | Yes | Create an Alpaca account, open the developer/paper dashboard, and generate an API key pair. See [Alpaca authentication](https://docs.alpaca.markets/us/v1.1/docs/authentication-1) and [paper trading setup](https://docs.alpaca.markets/us/docs/paper-trading). | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` |
+| OpenAI API | For research/chat | Create a project API key from the [OpenAI API key page](https://platform.openai.com/api-keys). API billing is separate from a ChatGPT subscription; follow the [OpenAI developer quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). | `OPENAI_API_KEY`, `OPENAI_MODEL` |
+| Arize AX | For hosted tracing | Create or open an Arize AX space, then go to **Settings → API Keys**. Copy the Current Space ID and generate an API key. See the [Arize tracing quickstart](https://arize.com/docs/ax/quickstarts). | `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, `ARIZE_PROJECT_NAME` |
+
+Keep all credentials in the local `.env` file. Do not paste them into source files,
+browser JavaScript, issues, chat messages, or commits.
+
 ## Quick setup
 
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd capstone
+git clone https://github.com/SaiKalyan124/csp-screener-capstone.git
+cd csp-screener-capstone
 ```
 
 ### 2. Create a virtual environment
@@ -175,13 +189,20 @@ Edit `.env`:
 ALPACA_API_KEY=your_market_data_key
 ALPACA_SECRET_KEY=your_market_data_secret
 
-# Optional agent and tracing configuration
+# Optional: enables CSP Research Intelligence and chat
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.6-luna
+OPENAI_MODEL=gpt-5-mini
+
+# Optional: exports LangChain/LangGraph traces to Arize AX
 ARIZE_SPACE_ID=
 ARIZE_API_KEY=
 ARIZE_PROJECT_NAME=csp-screener-capstone
 ```
+
+The minimum working `.env` contains the two Alpaca values. Leave optional values
+blank if you only want to run the deterministic dashboard and ticker screener.
+If `gpt-5-mini` is unavailable to your OpenAI project, replace it with a compatible
+model listed for that project.
 
 Never commit `.env`. It is already excluded by `.gitignore`.
 
@@ -206,6 +227,28 @@ csp-demo
 ```
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
+
+### 7. Verify the running setup
+
+Keep the server running and open a second terminal.
+
+Windows PowerShell:
+
+```powershell
+$result = Invoke-RestMethod "http://127.0.0.1:8080/api/options?symbol=MU"
+$result.symbol
+$result.contracts.Count
+```
+
+macOS or Linux:
+
+```bash
+curl -fsS "http://127.0.0.1:8080/api/options?symbol=MU" | python -m json.tool
+```
+
+A working Alpaca setup returns `MU` and an option-contract list. To verify the
+optional agent, ask a ticker question in the right-side chat. To verify Arize,
+make a chat request and confirm a new trace appears in the configured Arize project.
 
 ## API endpoints
 
@@ -280,11 +323,22 @@ Stop the existing local process using that port, then start the application agai
 
 ### The agent has no live model response
 
-Add `OPENAI_API_KEY` to `.env`. Deterministic screening and Alpaca option data do not require OpenAI.
+Add `OPENAI_API_KEY` to `.env` and confirm `OPENAI_MODEL` is available to that
+OpenAI project. API access and billing are separate from a ChatGPT subscription.
+Deterministic screening and Alpaca option data do not require OpenAI.
+
+### Dashboard refresh returns a connection error or HTTP 502
+
+Confirm the computer can reach Alpaca, the two Alpaca values are correct, and no
+VPN, proxy, firewall, or restricted runtime is blocking outbound network access.
+Restart the server after changing `.env`.
 
 ### No Arize traces appear
 
-Verify `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, and `ARIZE_PROJECT_NAME`, then run the course smoke test or make a chat request. Check the selected project and time range in Arize.
+Verify `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, and `ARIZE_PROJECT_NAME`, then restart
+the server and run the course smoke test or make a chat request. In Arize, check
+the selected project, environment, and time range. Without Arize credentials,
+traces are printed locally instead of exported.
 
 ## Security and data notes
 

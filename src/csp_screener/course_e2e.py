@@ -86,7 +86,7 @@ def _generate_answer(state: FlowState) -> dict[str, str]:
         from langchain_openai import ChatOpenAI
 
         model = ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"),
+            model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
             temperature=0,
         )
     else:
