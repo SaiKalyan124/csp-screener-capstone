@@ -12,7 +12,7 @@ from .observability import TracingStatus, setup_tracing
 from .providers import YahooFinanceMCPClient
 
 
-class ResearchState(TypedDict):
+class ResearchState(TypedDict, total=False):
     symbol: str
     symbols: list[str]
     question: str
@@ -23,14 +23,49 @@ class ResearchState(TypedDict):
     citations: list[dict[str, str]]
     warnings: list[str]
     discovery_requested: bool
+    budget: float | None
+    intent: str
+    research_summary: dict[str, Any]
+    selected_symbol: str | None
+    display_symbols: list[str]
+    ui_candidates: list[dict[str, Any]]
+    mandate: dict[str, Any]
+    data_quality: dict[str, Any]
+    eligibility_ledger: list[dict[str, Any]]
+    portfolio_fit: dict[str, dict[str, Any]]
+    scenario_matrix: dict[str, dict[str, Any]]
+    research_dossier: dict[str, Any]
+    risk_decision: dict[str, Any]
+    audit_record: dict[str, Any]
 
 
-class ShortlistState(TypedDict):
+class ShortlistState(TypedDict, total=False):
     candidates: list[dict[str, Any]]
     evidence_by_symbol: dict[str, list[dict[str, Any]]]
     raw_classifications: list[dict[str, Any]]
     warnings: list[str]
     output: dict[str, Any]
+    evidence_summary: dict[str, Any]
+
+
+def _prepare_eligible_shortlist(state: ShortlistState) -> dict[str, Any]:
+    """Keep deterministic eligibility authoritative before research begins."""
+    eligible = [
+        row for row in state.get("candidates", [])
+        if row.get("option_eligible") is True
+        and row.get("eligible_put_count", 0) >= 5
+        and row.get("eligible_call_count", 0) >= 5
+    ][:10]
+    return {"candidates": eligible, "warnings": list(state.get("warnings", []))}
+
+
+def _assess_shortlist_evidence(state: ShortlistState) -> dict[str, Any]:
+    rows = state.get("evidence_by_symbol", {})
+    return {"evidence_summary": {
+        "symbols_requested": len(state.get("candidates", [])),
+        "symbols_with_evidence": sum(bool(items) for items in rows.values()),
+        "documents_retrieved": sum(len(items) for items in rows.values()),
+    }}
 
 
 class ResearchAnswer(BaseModel):
@@ -198,24 +233,246 @@ def build_shortlist_graph():
     from langgraph.graph import END, START, StateGraph
 
     graph = StateGraph(ShortlistState)
-    graph.add_node("retrieve_shortlist_evidence", _retrieve_shortlist_evidence)
+    graph.add_node("prepare_eligible_shortlist", _prepare_eligible_shortlist)
+    graph.add_node("retrieve_yahoo_mcp_evidence", _retrieve_shortlist_evidence)
+    graph.add_node("assess_event_and_company_evidence", _assess_shortlist_evidence)
     graph.add_node("classify_shortlist_with_llm", _classify_shortlist_with_llm)
-    graph.add_node("validate_and_evaluate", _validate_shortlist_classification)
-    graph.add_edge(START, "retrieve_shortlist_evidence")
-    graph.add_edge("retrieve_shortlist_evidence", "classify_shortlist_with_llm")
-    graph.add_edge("classify_shortlist_with_llm", "validate_and_evaluate")
-    graph.add_edge("validate_and_evaluate", END)
+    graph.add_node("validate_scores_citations_and_eligibility", _validate_shortlist_classification)
+    graph.add_edge(START, "prepare_eligible_shortlist")
+    graph.add_edge("prepare_eligible_shortlist", "retrieve_yahoo_mcp_evidence")
+    graph.add_edge("retrieve_yahoo_mcp_evidence", "assess_event_and_company_evidence")
+    graph.add_edge("assess_event_and_company_evidence", "classify_shortlist_with_llm")
+    graph.add_edge("classify_shortlist_with_llm", "validate_scores_citations_and_eligibility")
+    graph.add_edge("validate_scores_citations_and_eligibility", END)
     return graph.compile()
 
 
+def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
+    symbol = state.get("symbol", "").strip().upper()
+    question = state.get("question", "").strip()
+    if not re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", symbol):
+        raise ValueError("Enter a valid ticker.")
+    if not question or len(question) > 600:
+        raise ValueError("Ask a research question between 1 and 600 characters.")
+    discovery = ResearchAgent._needs_discovery(question)
+    symbols = [] if discovery else ResearchAgent._symbols(symbol, question)
+    budget_match = re.search(r"\$\s*([\d,]+(?:\.\d+)?)|(?:budget|capital)(?:\s+of|\s+is)?\s*\$?\s*([\d,]+(?:\.\d+)?)", question, re.I)
+    budget_text = next((group for group in budget_match.groups() if group), None) if budget_match else None
+    return {
+        "symbol": symbol,
+        "question": question,
+        "symbols": symbols,
+        "discovery_requested": discovery,
+        "intent": "candidate_discovery" if discovery else "ticker_research",
+        "budget": float(budget_text.replace(",", "")) if budget_text else None,
+        "mandate": {
+            "budget": float(budget_text.replace(",", "")) if budget_text else None,
+            "strategy": "cash_secured_put",
+            "risk_tolerance": next(
+                (risk for risk in ("low", "medium", "high") if f"{risk} risk" in question.lower()),
+                "unspecified",
+            ),
+            "willing_to_own_underlying": "unknown",
+            "decision_scope": "research_only",
+        },
+    }
+
+
+def _route_research_intent(state: ResearchState) -> str:
+    return "deterministic_universe_screen" if state.get("discovery_requested") else "load_explicit_ticker_market_data"
+
+
+def _market_data_quality_gate(state: ResearchState) -> dict[str, Any]:
+    missing: list[str] = []
+    contexts = state.get("market_context", [])
+    if not contexts:
+        missing.append("market_context")
+    for context in contexts:
+        if context.get("spot") is None:
+            missing.append(f"{context.get('symbol')}:spot")
+        if not context.get("contracts"):
+            missing.append(f"{context.get('symbol')}:contracts")
+    return {"data_quality": {
+        "status": "usable" if not missing else "insufficient",
+        "missing_fields": missing,
+        "symbols_checked": len(contexts),
+        "source": "Alpaca market data",
+    }}
+
+
+def _deterministic_contract_eligibility(state: ResearchState) -> dict[str, Any]:
+    ledger: list[dict[str, Any]] = []
+    for context in state.get("market_context", []):
+        for contract in context.get("contracts", []):
+            reasons: list[str] = []
+            bid = float(contract.get("bid") or 0)
+            ask = float(contract.get("ask") or 0)
+            if bid <= 0:
+                reasons.append("non_positive_bid")
+            if ask < bid:
+                reasons.append("crossed_quote")
+            if contract.get("delta") is None:
+                reasons.append("missing_delta")
+            ledger.append({
+                "symbol": context.get("symbol"),
+                "contract": contract.get("contract_symbol"),
+                "eligible": not reasons,
+                "reason_codes": reasons,
+            })
+    return {"eligibility_ledger": ledger}
+
+
+def _portfolio_fit_and_stress(state: ResearchState) -> dict[str, Any]:
+    """Calculate collateral fit and downside scenarios without LLM judgment."""
+    contexts = state.get("market_context", [])
+    budget = state.get("budget")
+    portfolio_fit: dict[str, dict[str, Any]] = {}
+    scenarios: dict[str, dict[str, Any]] = {}
+    for context in contexts:
+        symbol = str(context.get("symbol"))
+        puts = [row for row in context.get("contracts", []) if row.get("strategy") == "Cash-secured put"]
+        cash_values = [float(row.get("cash_required") or float("inf")) for row in puts]
+        minimum_cash = min(cash_values, default=None)
+        portfolio_fit[symbol] = {
+            "minimum_cash_required": minimum_cash,
+            "affordable": budget is None or (minimum_cash is not None and minimum_cash <= budget),
+            "budget_utilization_pct": round(minimum_cash / budget * 100, 2) if budget and minimum_cash else None,
+        }
+        if puts:
+            selected = min(puts, key=lambda row: abs(abs(float(row.get("delta") or 0)) - 0.25))
+            strike = float(selected["strike"])
+            premium = (float(selected["bid"]) + float(selected["ask"])) / 2
+            effective_entry = strike - premium
+            scenarios[symbol] = {
+                "contract": selected.get("display_name"),
+                "effective_entry": round(effective_entry, 2),
+                "max_loss_if_stock_zero": round(effective_entry * 100, 2),
+                "loss_at_10pct_below_strike": round(max(effective_entry - strike * 0.9, 0) * 100, 2),
+                "loss_at_20pct_below_strike": round(max(effective_entry - strike * 0.8, 0) * 100, 2),
+                "loss_at_35pct_below_strike": round(max(effective_entry - strike * 0.65, 0) * 100, 2),
+            }
+    return {"research_summary": {
+        "intent": state.get("intent"),
+        "budget": budget,
+        "market_symbols": [row.get("symbol") for row in contexts],
+        "affordable_symbol_count": sum(row["affordable"] for row in portfolio_fit.values()),
+        "eligibility_authority": "deterministic",
+    }, "portfolio_fit": portfolio_fit, "scenario_matrix": scenarios}
+
+
+def _assess_research_evidence(state: ResearchState) -> dict[str, Any]:
+    summary = dict(state.get("research_summary", {}))
+    summary.update({
+        "evidence_documents": len(state.get("evidence", [])),
+        "evidence_urls": [row.get("url") for row in state.get("evidence", []) if row.get("url")],
+    })
+    evidence = state.get("evidence", [])
+    source_types = sorted({str(row.get("type") or "Unknown") for row in evidence})
+    dossier = {
+        "facts": evidence,
+        "source_types": source_types,
+        "coverage": "sufficient" if len(evidence) >= 2 else "limited",
+        "analyst_instructions": {
+            "thesis": "State only evidence-supported reasons the underlying may be acceptable to own.",
+            "counter_thesis": "Actively identify disconfirming evidence, downside catalysts, and missing facts.",
+            "uncertainty": "Do not equate missing adverse evidence with low risk.",
+        },
+    }
+    return {"research_summary": summary, "research_dossier": dossier}
+
+
+def _independent_risk_gate(state: ResearchState) -> dict[str, Any]:
+    reasons: list[str] = []
+    if state.get("data_quality", {}).get("status") != "usable":
+        reasons.append("insufficient_market_data")
+    if not any(row.get("eligible") for row in state.get("eligibility_ledger", [])):
+        reasons.append("no_eligible_contracts")
+    if state.get("budget") is not None and not any(
+        row.get("affordable") for row in state.get("portfolio_fit", {}).values()
+    ):
+        reasons.append("insufficient_cash_collateral")
+    if state.get("research_dossier", {}).get("coverage") == "limited":
+        reasons.append("limited_research_evidence")
+    hard_vetoes = {"insufficient_market_data", "no_eligible_contracts", "insufficient_cash_collateral"}
+    return {"risk_decision": {
+        "status": "veto" if hard_vetoes.intersection(reasons) else ("watch" if reasons else "pass"),
+        "reason_codes": reasons,
+        "llm_can_override": False,
+    }}
+
+
+def _record_decision_and_evals(state: ResearchState) -> dict[str, Any]:
+    citations = state.get("citations", [])
+    allowed = {str(row.get("url")) for row in state.get("evidence", []) if row.get("url")}
+    return {"audit_record": {
+        "intent": state.get("intent"),
+        "route": "discovery" if state.get("discovery_requested") else "explicit_ticker",
+        "symbols": state.get("symbols", []),
+        "eligible_contract_count": sum(bool(row.get("eligible")) for row in state.get("eligibility_ledger", [])),
+        "risk_status": state.get("risk_decision", {}).get("status"),
+        "risk_reason_codes": state.get("risk_decision", {}).get("reason_codes", []),
+        "citation_precision": round(sum(row.get("url") in allowed for row in citations) / len(citations), 3) if citations else 1.0,
+        "format_compliance": len(state.get("answer", "").splitlines()) == 3,
+        "ranking_authority": "deterministic",
+    }}
+
+
+def _validate_grounding_and_citations(state: ResearchState) -> dict[str, Any]:
+    allowed_urls = {str(row.get("url")) for row in state.get("evidence", []) if row.get("url")}
+    citations = [row for row in state.get("citations", []) if row.get("url") in allowed_urls]
+    lines = [line for line in state.get("answer", "").splitlines() if line.strip()]
+    if len(lines) != 3 or any(not line.startswith("- ") for line in lines):
+        raise ValueError("Research response must contain exactly three bullet points.")
+    context_symbols = {str(row.get("symbol")) for row in state.get("market_context", [])}
+    display = [symbol for symbol in state.get("display_symbols", []) if symbol in context_symbols]
+    selected = state.get("selected_symbol")
+    return {
+        "citations": citations,
+        "display_symbols": display,
+        "selected_symbol": selected if selected in context_symbols else None,
+    }
+
+
+def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
+    contexts = {row["symbol"]: row for row in state.get("market_context", [])}
+    answer_symbols = [
+        ticker for ticker in re.findall(r"\b[A-Z]{1,5}\b", state.get("answer", ""))
+        if ticker in contexts
+    ]
+    display = list(dict.fromkeys(answer_symbols or state.get("display_symbols", [])))
+    if not display:
+        display = list(contexts)[:3]
+    cards = []
+    for ticker in display[:5]:
+        context = contexts[ticker]
+        puts = [row for row in context.get("contracts", []) if row.get("strategy") == "Cash-secured put"]
+        best_put = min(puts, key=lambda row: abs(abs(float(row.get("delta") or 0)) - 0.25), default=None)
+        expiration = context.get("expiration")
+        cards.append({
+            "symbol": ticker,
+            "spot": context.get("spot"),
+            "score": (context.get("stock_ranking") or {}).get("score"),
+            "expiration": datetime.fromisoformat(expiration).strftime("%b %d, %Y") if expiration else None,
+            "put": best_put,
+        })
+    return {
+        "display_symbols": display,
+        "selected_symbol": display[0] if display else state.get("selected_symbol"),
+        "ui_candidates": cards,
+    }
+
+
 def _retrieve(state: ResearchState) -> dict[str, Any]:
-    warnings: list[str] = []
+    warnings = list(state.get("warnings", []))
     try:
         evidence_symbol = state["symbols"][0] if state["symbols"] else state["symbol"]
         packet = YahooFinanceMCPClient().company_evidence(
-            evidence_symbol, filing_limit=5, news_limit=0
+            evidence_symbol, filing_limit=5, news_limit=3
         )
-        evidence = _normalize_filings(packet.get("filings"), limit=5)
+        evidence = [
+            *_normalize_filings(packet.get("filings"), limit=5),
+            *(packet.get("news") or [])[:3],
+        ]
     except Exception as exc:
         evidence = []
         warnings.append(f"Yahoo MCP retrieval failed: {type(exc).__name__}")
@@ -261,7 +518,10 @@ def _answer(state: ResearchState) -> dict[str, Any]:
                 "human",
                 "Current ticker: {symbol}\nQuestion: {question}\n"
                 "Deterministic market context: {market_context}\n"
-                "Filing metadata: {evidence}",
+                "Mandate and portfolio fit: {mandate}\n"
+                "Assignment stress scenarios: {scenarios}\n"
+                "Independent risk gate: {risk_decision}\n"
+                "Evidence dossier, including thesis/counter-thesis instructions: {dossier}",
             ),
         ]
     )
@@ -276,6 +536,10 @@ def _answer(state: ResearchState) -> dict[str, Any]:
             "question": state["question"],
             "evidence": state["evidence"],
             "market_context": state["market_context"],
+            "mandate": state.get("mandate", {}),
+            "scenarios": state.get("scenario_matrix", {}),
+            "risk_decision": state.get("risk_decision", {}),
+            "dossier": state.get("research_dossier", {}),
         }
     )
     cited = [url for url in result.cited_urls if url in allowed_urls]
@@ -305,17 +569,44 @@ def _answer(state: ResearchState) -> dict[str, Any]:
     }
 
 
-def build_research_graph(gather_market):
+def build_research_graph(load_explicit_market, discover_market):
     from langgraph.graph import END, START, StateGraph
 
     graph = StateGraph(ResearchState)
-    graph.add_node("gather_market_context", gather_market)
-    graph.add_node("retrieve_filing_metadata", _retrieve)
-    graph.add_node("generate_grounded_research", _answer)
-    graph.add_edge(START, "gather_market_context")
-    graph.add_edge("gather_market_context", "retrieve_filing_metadata")
-    graph.add_edge("retrieve_filing_metadata", "generate_grounded_research")
-    graph.add_edge("generate_grounded_research", END)
+    graph.add_node("parse_question_and_profile", _parse_question_and_profile)
+    graph.add_node("load_explicit_ticker_market_data", load_explicit_market)
+    graph.add_node("deterministic_universe_screen", discover_market)
+    graph.add_node("market_data_quality_gate", _market_data_quality_gate)
+    graph.add_node("deterministic_contract_eligibility", _deterministic_contract_eligibility)
+    graph.add_node("portfolio_fit_and_assignment_stress", _portfolio_fit_and_stress)
+    graph.add_node("retrieve_yahoo_mcp_evidence", _retrieve)
+    graph.add_node("build_institutional_research_dossier", _assess_research_evidence)
+    graph.add_node("independent_risk_veto", _independent_risk_gate)
+    graph.add_node("develop_thesis_counterthesis_and_response", _answer)
+    graph.add_node("validate_grounding_and_citations", _validate_grounding_and_citations)
+    graph.add_node("prepare_screener_cards", _prepare_screener_cards)
+    graph.add_node("record_decision_and_evals", _record_decision_and_evals)
+    graph.add_edge(START, "parse_question_and_profile")
+    graph.add_conditional_edges(
+        "parse_question_and_profile",
+        _route_research_intent,
+        {
+            "load_explicit_ticker_market_data": "load_explicit_ticker_market_data",
+            "deterministic_universe_screen": "deterministic_universe_screen",
+        },
+    )
+    graph.add_edge("load_explicit_ticker_market_data", "market_data_quality_gate")
+    graph.add_edge("deterministic_universe_screen", "market_data_quality_gate")
+    graph.add_edge("market_data_quality_gate", "deterministic_contract_eligibility")
+    graph.add_edge("deterministic_contract_eligibility", "portfolio_fit_and_assignment_stress")
+    graph.add_edge("portfolio_fit_and_assignment_stress", "retrieve_yahoo_mcp_evidence")
+    graph.add_edge("retrieve_yahoo_mcp_evidence", "build_institutional_research_dossier")
+    graph.add_edge("build_institutional_research_dossier", "independent_risk_veto")
+    graph.add_edge("independent_risk_veto", "develop_thesis_counterthesis_and_response")
+    graph.add_edge("develop_thesis_counterthesis_and_response", "validate_grounding_and_citations")
+    graph.add_edge("validate_grounding_and_citations", "prepare_screener_cards")
+    graph.add_edge("prepare_screener_cards", "record_decision_and_evals")
+    graph.add_edge("record_decision_and_evals", END)
     return graph.compile()
 
 
@@ -330,7 +621,9 @@ class ResearchAgent:
         self.tracing: TracingStatus = setup_tracing()
         self.market_context_loader = market_context_loader
         self.discovery_loader = discovery_loader
-        self.graph = build_research_graph(self._gather_market)
+        self.graph = build_research_graph(
+            self._load_explicit_market, self._discover_market
+        )
         self.shortlist_graph = build_shortlist_graph()
 
     def classify_shortlist(self, candidates: list[dict[str, Any]]) -> dict[str, Any]:
@@ -348,20 +641,27 @@ class ResearchAgent:
         })
         return result["output"]
 
-    def _gather_market(self, state: ResearchState) -> dict[str, Any]:
+    def _load_explicit_market(self, state: ResearchState) -> dict[str, Any]:
         contexts: list[dict[str, Any]] = []
         warnings = list(state.get("warnings", []))
-        if state["discovery_requested"]:
+        for symbol in state.get("symbols", [])[:5]:
             try:
-                contexts = self.discovery_loader(state["question"])
+                contexts.append(self.market_context_loader(symbol))
             except Exception as exc:
-                warnings.append(f"Candidate discovery failed: {type(exc).__name__}")
-        else:
-            for symbol in state["symbols"][:5]:
-                try:
-                    contexts.append(self.market_context_loader(symbol))
-                except Exception as exc:
-                    warnings.append(f"{symbol} market data unavailable: {type(exc).__name__}")
+                warnings.append(f"{symbol} market data unavailable: {type(exc).__name__}")
+        return {
+            "market_context": contexts,
+            "symbols": [row["symbol"] for row in contexts],
+            "warnings": warnings,
+        }
+
+    def _discover_market(self, state: ResearchState) -> dict[str, Any]:
+        warnings = list(state.get("warnings", []))
+        try:
+            contexts = self.discovery_loader(state["question"])
+        except Exception as exc:
+            contexts = []
+            warnings.append(f"Candidate discovery failed: {type(exc).__name__}")
         return {
             "market_context": contexts,
             "symbols": [row["symbol"] for row in contexts],
@@ -402,12 +702,9 @@ class ResearchAgent:
             raise ValueError("Enter a valid ticker.")
         if not question or len(question) > 600:
             raise ValueError("Ask a research question between 1 and 600 characters.")
-        discovery_requested = self._needs_discovery(question)
-        symbols = [] if discovery_requested else self._symbols(symbol, question)
         result = self.graph.invoke(
             {
                 "symbol": symbol,
-                "symbols": symbols,
                 "question": question,
                 "evidence": [],
                 "market_context": [],
@@ -415,10 +712,9 @@ class ResearchAgent:
                 "risk_level": "unknown",
                 "citations": [],
                 "warnings": [],
-                "discovery_requested": discovery_requested,
             }
         )
-        symbols = result.get("symbols", symbols)
+        symbols = result.get("symbols", [])
         selected = result.get("selected_symbol")
         if selected not in symbols:
             scored = [
@@ -429,44 +725,8 @@ class ResearchAgent:
                 max(scored, key=lambda row: row["stock_ranking"]["score"])["symbol"]
                 if scored else (symbols[0] if len(symbols) == 1 else None)
             )
-        contexts_by_symbol = {
-            row["symbol"]: row for row in result.get("market_context", [])
-        }
-        answer_symbols = [
-            ticker for ticker in re.findall(r"\b[A-Z]{1,5}\b", result["answer"])
-            if ticker in contexts_by_symbol
-        ]
-        display_symbols = [
-            ticker for ticker in result.get("display_symbols", [])
-            if ticker in contexts_by_symbol
-        ]
-        if answer_symbols:
-            display_symbols = list(dict.fromkeys(answer_symbols))
-        if not display_symbols:
-            display_symbols = list(contexts_by_symbol)[:3]
-        if display_symbols:
-            selected = display_symbols[0]
-        ui_candidates = []
-        for ticker in display_symbols[:5]:
-            context = contexts_by_symbol[ticker]
-            puts = [
-                row for row in context.get("contracts", [])
-                if row.get("strategy") == "Cash-secured put"
-            ]
-            best_put = min(
-                puts,
-                key=lambda row: abs(abs(float(row.get("delta") or 0)) - 0.25),
-                default=None,
-            )
-            ui_candidates.append(
-                {
-                    "symbol": ticker,
-                    "spot": context.get("spot"),
-                    "score": (context.get("stock_ranking") or {}).get("score"),
-                    "expiration": datetime.fromisoformat(context["expiration"]).strftime("%b %d, %Y"),
-                    "put": best_put,
-                }
-            )
+        if result.get("display_symbols"):
+            selected = result["display_symbols"][0]
         return {
             "iteration": 2,
             "agent": "Kezzy",
@@ -481,8 +741,10 @@ class ResearchAgent:
             "citations": result["citations"],
             "warnings": result["warnings"],
             "market_symbols": symbols,
+            "risk_decision": result.get("risk_decision", {}),
+            "audit_record": result.get("audit_record", {}),
             "ui_action": (
                 {"type": "load_options", "symbol": selected} if selected else None
             ),
-            "ui_candidates": ui_candidates,
+            "ui_candidates": result.get("ui_candidates", []),
         }

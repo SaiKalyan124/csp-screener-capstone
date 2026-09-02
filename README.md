@@ -32,68 +32,12 @@ The application is research-only: it does not place trades or provide personaliz
 
 ![LangGraph routing diagram for research and follow-up questions](docs/screenshots/langgraph-routing.png)
 
-## Current iterations
-
-| Iteration | Status | Scope |
-|---|---|---|
-| 1 | Implemented | Alpaca data, deterministic CSP eligibility/ranking, dashboard, ticker screener, caching, scheduled refresh |
-| 2 | In progress | LangChain components inside a LangGraph research workflow, grounded answers, follow-ups, Arize tracing |
-| 3 | Planned | Profile and durable memory, position-aware routing, stronger RAG, evaluations and guardrails |
-
 ## Architecture
 
 Review the pending end-state design in either format:
 
 - [GitHub-rendered architecture and Mermaid diagrams](docs/ARCHITECTURE.md)
 - [Single-page HTML architecture review](docs/architecture-review.html)
-
-```text
-Iteration 1 — Deterministic CSP Screener
-Alpaca market data
-   -> eligibility filters and CSP calculations
-   -> ranked dashboard and ticker option screen
-   -> cache and scheduled refresh
-
-Iteration 2 — CSP Research Intelligence
-Iteration 1 screen results
-   + company evidence and news retrieval
-   -> LangChain tools inside a LangGraph workflow
-   -> comparisons, budget/risk questions and follow-ups
-   -> Arize traces and evaluations
-
-Iteration 3 — Personalized, Position-Aware Assistant
-Iteration 2 research workflow
-   + user profile and durable memory
-   + portfolio and current-position context
-   -> CSP versus covered-call routing
-   -> alerts, guardrails and monitored recommendations
-```
-
-Each iteration remains independently testable. Iteration 1 owns deterministic financial calculations; Iteration 2 adds evidence-grounded AI research without replacing those calculations; Iteration 3 adds personalization, memory, and position-aware routing.
-
-### Iteration 1: deterministic screening
-
-- Pull stock and option-chain data from Alpaca.
-- Apply explicit eligibility, affordability, liquidity, volatility, and risk rules.
-- Rank the top CSP candidates without an LLM.
-- Display the dashboard and ticker-specific option screen.
-- Cache results and refresh dashboard data on a schedule.
-
-### Iteration 2: research and reasoning
-
-- Use LangGraph to route research and follow-up requests.
-- Use LangChain for model, tool, retrieval, and structured-output integrations.
-- Ground responses in deterministic screen results and retrieved company evidence.
-- Support ticker discovery, comparisons, budget constraints, risk questions, and conversational follow-ups.
-- Trace workflow steps, latency, inputs, and outputs with Arize.
-
-### Iteration 3: profile, memory, and portfolio context
-
-- Store a small user profile: budget, risk preference, timeline, sectors, and strategy constraints.
-- Add durable conversation and research memory with clear retention boundaries.
-- Incorporate owned shares, open positions, watchlists, and buying power.
-- Route between CSP research, covered-call research, general investing questions, and alerts.
-- Add stronger evaluations, safety guardrails, freshness checks, and human confirmation before consequential actions.
 
 ## Development workstreams
 

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "research_agent": "./src/csp_screener/studio.py:research_graph",
+    "dashboard_research": "./src/csp_screener/studio.py:shortlist_graph"
+  },
+  "env": ".env"
+}

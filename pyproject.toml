@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
+studio = ["langgraph-cli[inmem]>=0.4,<1"]
 
 [project.scripts]
 csp-benchmark = "csp_screener.cli:main"

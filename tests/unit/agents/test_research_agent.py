@@ -4,6 +4,9 @@ from csp_screener.iteration2 import (
     ResearchAnswer,
     ResearchAgent,
     _answer,
+    _parse_question_and_profile,
+    _prepare_eligible_shortlist,
+    _route_research_intent,
     _validate_shortlist_classification,
 )
 
@@ -69,6 +72,37 @@ def test_agent_detects_top_three_capital_wording_as_discovery():
     assert ResearchAgent._needs_discovery(
         "give me top 3 csp trades for now i have capital of 50k"
     )
+
+
+def test_graph_parser_routes_explicit_ticker_research():
+    state = _parse_question_and_profile({
+        "symbol": "mu",
+        "question": "Compare MU with AMD for CSP.",
+    })
+    assert state["symbols"] == ["MU", "AMD"]
+    assert state["intent"] == "ticker_research"
+    assert _route_research_intent(state) == "load_explicit_ticker_market_data"
+
+
+def test_graph_parser_routes_discovery_and_extracts_budget():
+    state = _parse_question_and_profile({
+        "symbol": "MU",
+        "question": "Give me top 3 CSP ideas with $50,000.",
+    })
+    assert state["symbols"] == []
+    assert state["budget"] == 50000
+    assert _route_research_intent(state) == "deterministic_universe_screen"
+
+
+def test_dashboard_graph_removes_ineligible_candidates_before_research():
+    result = _prepare_eligible_shortlist({
+        "candidates": [
+            {"symbol": "MU", "option_eligible": True, "eligible_put_count": 5, "eligible_call_count": 5},
+            {"symbol": "BKNG", "option_eligible": False, "eligible_put_count": 0, "eligible_call_count": 0},
+        ],
+        "warnings": [],
+    })
+    assert [row["symbol"] for row in result["candidates"]] == ["MU"]
 
 
 def test_shortlist_evaluations_preserve_eligibility_scores_and_citations():

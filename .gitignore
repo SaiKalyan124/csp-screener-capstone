@@ -6,6 +6,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.langgraph_api/
 results/*.jsonl
 node_modules/
 .pnpm-store/
