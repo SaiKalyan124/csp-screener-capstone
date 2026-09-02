@@ -296,6 +296,21 @@ const sidebarToggle = document.querySelector("#sidebar-toggle");
 const chatToggle = document.querySelector("#chat-toggle");
 const chatHintsToggle = document.querySelector("#chat-hints-toggle");
 const chatHints = document.querySelector("#chat-hints");
+const themeToggle = document.querySelector("#theme-toggle");
+
+function applyTheme(theme) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  themeToggle.setAttribute("aria-checked", String(dark));
+  themeToggle.setAttribute("aria-label", dark ? "Use light theme" : "Use dark theme");
+  themeToggle.querySelector("b").textContent = dark ? "Dark" : "Light";
+  localStorage.setItem("csp-theme", dark ? "dark" : "light");
+}
+
+applyTheme(localStorage.getItem("csp-theme") || "light");
+themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
 
 chatHintsToggle.addEventListener("click", () => {
   const collapsed = !chatHints.hidden;
