@@ -4,12 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CSP Screener — End-State Design Preview</title>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script>
-    (function waitForMermaid(attempt) {
+    window.__cspMermaidReady = window.__cspMermaidReady || (async function () {
       if (!window.mermaid) {
-        if (attempt < 100) setTimeout(function () { waitForMermaid(attempt + 1); }, 50);
-        return;
+        const response = await fetch("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js");
+        if (!response.ok) throw new Error("Mermaid bundle could not be loaded");
+        const source = await response.text();
+        const script = document.createElement("script");
+        script.textContent = source;
+        document.head.appendChild(script);
+        script.remove();
       }
       mermaid.initialize({
         startOnLoad: false,
@@ -37,7 +41,9 @@
       } else {
         renderDiagrams();
       }
-    })(0);
+    })().catch(function (error) {
+      console.error("Architecture diagrams could not be rendered", error);
+    });
   </script>
   <style>
     :root {
