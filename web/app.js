@@ -14,6 +14,7 @@ const dashboardRun = document.querySelector("#dashboard-run");
 const dashboardEmpty = document.querySelector("#dashboard-empty");
 const dashboardResults = document.querySelector("#dashboard-results");
 let dashboardResearchStatus = "pending";
+let activeSymbol = input.value.trim().toUpperCase() || "MU";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const number = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -127,6 +128,8 @@ async function loadChain(symbol) {
     const response = await fetch(`/api/options?symbol=${encodeURIComponent(symbol)}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The option chain could not be loaded.");
+    activeSymbol = data.symbol;
+    input.value = data.symbol;
     document.querySelector("#context-symbol").textContent = data.symbol;
     document.querySelector("#context-price").textContent = `${money.format(data.spot)} latest trade`;
     document.querySelector("#context-expiry").textContent = new Date(`${data.expiration}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -175,13 +178,30 @@ const chatForm = document.querySelector("#chat-form");
 const chatQuestion = document.querySelector("#chat-question");
 const chatMessages = document.querySelector("#chat-messages");
 
+function tickerFromQuestion(question) {
+  const ignored = new Set(["AI", "CSP", "DTE", "ETF", "ITM", "OTM", "SEC", "USD"]);
+  const prefixed = question.match(/^\s*\$?([A-Za-z][A-Za-z.\-]{0,9})\s*:/);
+  const cashtag = question.match(/\$([A-Za-z][A-Za-z.\-]{0,9})\b/);
+  const uppercase = question.match(/\b[A-Z][A-Z.\-]{0,9}\b/g) || [];
+  const candidates = [prefixed?.[1], cashtag?.[1], ...uppercase].filter(Boolean);
+  return candidates
+    .map((candidate) => candidate.toUpperCase())
+    .find((candidate) => !ignored.has(candidate) && /^[A-Z][A-Z.\-]{0,9}$/.test(candidate));
+}
+
 async function askKezzy(questionText) {
   const question = questionText.trim();
   if (!question) return;
-  const symbol = input.value.trim().toUpperCase() || "MU";
+  const symbol = tickerFromQuestion(question) || activeSymbol;
+  activeSymbol = symbol;
+  input.value = symbol;
+  const displayQuestion = question.replace(
+    /^\s*\$?[A-Za-z][A-Za-z.\-]{0,9}\s*:\s*/,
+    "",
+  ).trim() || question;
   const userMessage = document.createElement("p");
   userMessage.className = "user-message";
-  userMessage.textContent = `${symbol}: ${question}`;
+  userMessage.textContent = `${symbol}: ${displayQuestion}`;
   const answerMessage = document.createElement("div");
   answerMessage.className = "assistant-message agent-response";
   answerMessage.textContent = "Researching filing metadata…";
@@ -210,10 +230,6 @@ async function askKezzy(questionText) {
         bulletList.append(bullet);
       });
     answerMessage.append(bulletList);
-    const risk = document.createElement("span");
-    risk.className = "risk-tag";
-    risk.textContent = `Research risk: ${data.risk_level} · ${data.evidence_scope}`;
-    answerMessage.append(risk);
     if (data.citations.length) {
       const citations = document.createElement("span");
       citations.className = "chat-citations";
