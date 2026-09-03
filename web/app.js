@@ -47,7 +47,7 @@ async function apiFetch(url, options = {}) {
 
 function showAuthenticated(session) {
   currentSession = session;
-  accessToken = session?.access_token || null;
+  accessToken = typeof session?.access_token === "string" ? session.access_token.trim() : null;
   const signedIn = Boolean(session);
   authGate.hidden = signedIn;
   document.querySelector(".app-shell").hidden = !signedIn;
@@ -68,8 +68,8 @@ async function initializeAuth() {
     }
     authRequired = true;
     supabaseClient = window.supabase.createClient(
-      config.supabase_url,
-      config.supabase_anon_key,
+      config.supabase_url.trim(),
+      config.supabase_anon_key.trim(),
       { auth: { persistSession: true, autoRefreshToken: true } },
     );
     const { data } = await supabaseClient.auth.getSession();
