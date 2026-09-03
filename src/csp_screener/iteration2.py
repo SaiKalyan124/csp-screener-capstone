@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Callable, TypedDict
 
 from pydantic import BaseModel, Field
 
 from .course_e2e import _normalize_filings
 from .observability import TracingStatus, setup_tracing
-from .providers import YahooFinanceMCPClient
-from .parsing import parse_budget, parse_requested_count
+from .providers import TavilyMCPClient, YahooFinanceMCPClient
+from .parsing import (
+    extract_company_names,
+    extract_mentioned_tickers,
+    parse_budget,
+    parse_expiration_date,
+    parse_requested_count,
+)
 
 
 class ResearchState(TypedDict, total=False):
@@ -24,9 +30,12 @@ class ResearchState(TypedDict, total=False):
     citations: list[dict[str, str]]
     warnings: list[str]
     discovery_requested: bool
+    company_names: list[str]
+    requested_expiration: str | None
     budget: float | None
     requested_count: int
     intent: str
+    source_intent: str
     research_summary: dict[str, Any]
     selected_symbol: str | None
     display_symbols: list[str]
@@ -257,13 +266,25 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
     if not question or len(question) > 600:
         raise ValueError("Ask a research question between 1 and 600 characters.")
     discovery = ResearchAgent._needs_discovery(question)
-    symbols = [] if discovery else ResearchAgent._symbols(symbol, question)
+    tickers = extract_mentioned_tickers(question)
+    company_names = extract_company_names(question)
+    expiration = parse_expiration_date(question)
+    if discovery:
+        symbols: list[str] = []
+    elif tickers:
+        symbols = tickers
+    elif company_names:
+        symbols = []
+    else:
+        symbols = [symbol]
     budget = parse_budget(question)
     requested_count = parse_requested_count(question)
     return {
         "symbol": symbol,
         "question": question,
         "symbols": symbols,
+        "company_names": company_names,
+        "requested_expiration": expiration.isoformat() if expiration else None,
         "discovery_requested": discovery,
         "intent": "candidate_discovery" if discovery else "ticker_research",
         "budget": budget,
@@ -282,8 +303,67 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
     }
 
 
+_OPTIONS_TERMS = (
+    "csp", "cash-secured", "cash secured", "covered call", "option chain",
+    "option", "put", "call", "dte", "delta", "strike", "premium",
+    "collateral", "assignment", "otm", "itm",
+)
+_NEWS_TERMS = (
+    "latest news", "recent news", "stock news", "company news",
+    "headline", "headlines", "what happened", "announcement",
+    "press release", "catalyst", "news",
+)
+
+
+def classify_source_intent(
+    question: str,
+    *,
+    discovery: bool = False,
+    named_subject: bool = False,
+) -> str:
+    """Route option-contract questions to Alpaca; all other chat research to Tavily."""
+    lowered = question.lower()
+    has_options = discovery or any(
+        _question_has_term(lowered, term) for term in _OPTIONS_TERMS
+    )
+    has_news = any(_question_has_term(lowered, term) for term in _NEWS_TERMS)
+    if has_options and (has_news or (named_subject and not discovery)):
+        return "both"
+    if has_options:
+        return "options"
+    return "news"
+
+
+def _question_has_term(text: str, term: str) -> bool:
+    if " " in term or "-" in term:
+        return term in text
+    return bool(re.search(rf"\b{re.escape(term)}s?\b", text))
+
+
+def _classify_question_source(state: ResearchState) -> dict[str, Any]:
+    return {
+        "source_intent": classify_source_intent(
+            state.get("question", ""),
+            discovery=bool(state.get("discovery_requested")),
+            named_subject=bool(state.get("symbols") or state.get("company_names")),
+        )
+    }
+
+
 def _route_research_intent(state: ResearchState) -> str:
     return "deterministic_universe_screen" if state.get("discovery_requested") else "load_explicit_ticker_market_data"
+
+
+def _route_after_classify(state: ResearchState) -> str:
+    if state.get("source_intent") == "news":
+        return "retrieve_tavily_news"
+    return _route_research_intent(state)
+
+
+def _route_after_market(state: ResearchState) -> str:
+    if state.get("source_intent") == "both":
+        return "retrieve_tavily_news"
+    return "build_institutional_research_dossier"
 
 
 def _market_data_quality_gate(state: ResearchState) -> dict[str, Any]:
@@ -315,7 +395,7 @@ def _deterministic_contract_eligibility(state: ResearchState) -> dict[str, Any]:
                 reasons.append("non_positive_bid")
             if ask < bid:
                 reasons.append("crossed_quote")
-            if contract.get("delta") is None:
+            if contract.get("delta") is None and not state.get("requested_expiration"):
                 reasons.append("missing_delta")
             ledger.append({
                 "symbol": context.get("symbol"),
@@ -387,12 +467,17 @@ def _assess_research_evidence(state: ResearchState) -> dict[str, Any]:
 
 def _independent_risk_gate(state: ResearchState) -> dict[str, Any]:
     reasons: list[str] = []
-    if state.get("data_quality", {}).get("status") != "usable":
+    news_only = state.get("source_intent") == "news"
+    if not news_only and state.get("data_quality", {}).get("status") != "usable":
         reasons.append("insufficient_market_data")
-    if not any(row.get("eligible") for row in state.get("eligibility_ledger", [])):
+    if not news_only and not any(
+        row.get("eligible") for row in state.get("eligibility_ledger", [])
+    ):
         reasons.append("no_eligible_contracts")
-    if state.get("budget") is not None and not any(
-        row.get("affordable") for row in state.get("portfolio_fit", {}).values()
+    if (
+        not news_only
+        and state.get("budget") is not None
+        and not any(row.get("affordable") for row in state.get("portfolio_fit", {}).values())
     ):
         reasons.append("insufficient_cash_collateral")
     if state.get("research_dossier", {}).get("coverage") == "limited":
@@ -410,6 +495,7 @@ def _record_decision_and_evals(state: ResearchState) -> dict[str, Any]:
     allowed = {str(row.get("url")) for row in state.get("evidence", []) if row.get("url")}
     return {"audit_record": {
         "intent": state.get("intent"),
+        "source_intent": state.get("source_intent"),
         "route": "discovery" if state.get("discovery_requested") else "explicit_ticker",
         "symbols": state.get("symbols", []),
         "eligible_contract_count": sum(bool(row.get("eligible")) for row in state.get("eligibility_ledger", [])),
@@ -427,7 +513,17 @@ def _validate_grounding_and_citations(state: ResearchState) -> dict[str, Any]:
     lines = [line for line in state.get("answer", "").splitlines() if line.strip()]
     if not 1 <= len(lines) <= 10 or any(not line.startswith("- ") for line in lines):
         raise ValueError("Research response must contain between one and ten bullet points.")
-    context_symbols = {str(row.get("symbol")) for row in state.get("market_context", [])}
+    context_symbols = {
+        str(row.get("symbol"))
+        for row in state.get("market_context", [])
+        if row.get("symbol")
+    }
+    if not context_symbols:
+        context_symbols = {
+            str(symbol).upper()
+            for symbol in [*state.get("symbols", []), state.get("symbol")]
+            if symbol
+        }
     display = [symbol for symbol in state.get("display_symbols", []) if symbol in context_symbols]
     if state.get("discovery_requested"):
         requested_count = int(state.get("requested_count", 3))
@@ -445,6 +541,17 @@ def _validate_grounding_and_citations(state: ResearchState) -> dict[str, Any]:
 
 
 def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
+    if state.get("source_intent") == "news":
+        display = list(dict.fromkeys(
+            str(symbol).upper()
+            for symbol in [*state.get("display_symbols", []), *state.get("symbols", []), state.get("symbol")]
+            if symbol
+        ))
+        return {
+            "display_symbols": display,
+            "selected_symbol": display[0] if display else state.get("selected_symbol"),
+            "ui_candidates": [],
+        }
     contexts = {row["symbol"]: row for row in state.get("market_context", [])}
     answer_symbols = [
         ticker for ticker in re.findall(r"\b[A-Z]{1,5}\b", state.get("answer", ""))
@@ -471,6 +578,36 @@ def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
         "selected_symbol": display[0] if display else state.get("selected_symbol"),
         "ui_candidates": cards,
     }
+
+
+def _retrieve_tavily_news(state: ResearchState) -> dict[str, Any]:
+    warnings = list(state.get("warnings", []))
+    question = str(state.get("question", "")).strip()
+    if not question:
+        warnings.append("No question was available for Tavily news retrieval.")
+        return {"evidence": [], "warnings": warnings}
+    try:
+        result = TavilyMCPClient().search_news(question, max_results=5)
+        if result.get("error"):
+            warnings.append(f"Tavily retrieval failed: {result['error']}")
+        evidence = list(result.get("news") or [])[:5]
+    except Exception as exc:
+        evidence = []
+        warnings.append(f"Tavily MCP retrieval failed: {type(exc).__name__}")
+    if not evidence:
+        warnings.append("No Tavily news was available; the agent must abstain.")
+    return {"evidence": evidence, "warnings": warnings}
+
+
+def _evidence_label(row: dict[str, Any]) -> str:
+    kind = str(row.get("type") or "News")
+    raw_date = row.get("date")
+    if not raw_date:
+        return kind
+    try:
+        return f"{kind} · {datetime.fromisoformat(str(raw_date)).strftime('%b %d, %Y')}"
+    except ValueError:
+        return kind
 
 
 def _retrieve(state: ResearchState) -> dict[str, Any]:
@@ -504,13 +641,15 @@ def _retrieve(state: ResearchState) -> dict[str, Any]:
 
 def _answer(state: ResearchState) -> dict[str, Any]:
     from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
 
     allowed_urls = {str(row.get("url")) for row in state["evidence"] if row.get("url")}
     if not state["evidence"] and not state["market_context"]:
+        source = "news" if state.get("source_intent") == "news" else "market or filing"
         return {
             "answer": (
-                "- I could not retrieve market or filing evidence for this request.\n"
-                "- I cannot provide a grounded CSP assessment without that context.\n"
+                f"- I could not retrieve {source} evidence for this request.\n"
+                "- I cannot provide a grounded assessment without that context.\n"
                 "- Try again after market data or company evidence is available."
             ),
             "risk_level": "unknown",
@@ -519,44 +658,102 @@ def _answer(state: ResearchState) -> dict[str, Any]:
             "display_symbols": [],
         }
 
+    news_only = state.get("source_intent") == "news"
+    if news_only:
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are a stock and financial-analysis research assistant. Use only the "
+                    "supplied Tavily news evidence to answer the user's question as written. "
+                    "Cover any company, ticker, or market topic they named. Do not mention "
+                    "or summarize any other company. Do not invent prices, option contracts, "
+                    "or filings. Do not promise returns, tell the user what they should buy, "
+                    "or place trades. Do not print source URLs. If the evidence cannot answer "
+                    "the question, say so in three short bullets. Return between one and ten "
+                    "concise, non-redundant bullet points under 240 characters each.",
+                ),
+                (
+                    "human",
+                    "Question: {question}\nTavily news evidence: {evidence}",
+                ),
+            ]
+        )
+        model = ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), temperature=0
+        ).with_structured_output(ResearchAnswer)
+        result = (prompt | model).invoke({
+            "question": state["question"],
+            "evidence": state["evidence"],
+        })
+        bullet_points = list(result.bullet_points)
+        cited = [url for url in result.cited_urls if url in allowed_urls]
+        citations = [
+            {
+                "label": next(
+                    (
+                        _evidence_label(row)
+                        for row in state["evidence"]
+                        if row.get("url") == url
+                    ),
+                    "News",
+                ),
+                "url": url,
+            }
+            for url in cited
+        ]
+        return {
+            "answer": "\n".join(f"- {point.strip()}" for point in bullet_points[:10]),
+            "risk_level": result.risk_level.lower()
+            if result.risk_level.lower() in {"low", "medium", "high", "unknown"}
+            else "unknown",
+            "citations": citations,
+            "selected_symbol": None,
+            "display_symbols": [],
+        }
+
+    system_prompt = (
+        "You are CSP Research Bot, a bounded institutional-style CSP research assistant. Use only the supplied "
+        "deterministic market context and news evidence. Explain and compare candidates, "
+        "but do not promise returns, tell the user what they should buy, or place trades. "
+        "The screener ticker is only a UI default; answer with symbols present in market "
+        "context, never substitute another company's contracts. If a requested expiration "
+        "is present, report premiums for that date only and do not replace it with a later "
+        "screener expiration. "
+        "For budget questions, discuss cash required and fit rather than directing an "
+        "investment. Never claim you read a filing body. Treat retrieved news "
+        "as private research context: do not print source URLs, filing inventories, or a "
+        "citation list in the answer. Mention evidence only when its title/metadata signals "
+        "a material catalyst or risk such as earnings guidance, regulation, litigation, "
+        "financing, management changes, security incidents, or major product events. Briefly "
+        "state the implication without overstating what the metadata proves. Ignore routine "
+        "filings, generic price-move stories, and unrelated headlines. If no material item "
+        "is found, say that no material recent catalyst was identified. If evidence cannot "
+        "answer the question, say so. Return only selected tickers present in the evidence. "
+        "For puts, lower absolute delta and a lower strike are generally safer but offer "
+        "different premium; describe the tradeoff rather than declaring safety. Format "
+        "dates as Month day, year and contracts as 'TICKER · Month day, year · $strike put' "
+        "instead of displaying raw OCC symbols. Return between one and ten concise, "
+        "non-redundant bullet points. Keep every bullet under 240 characters. For a "
+        "discovery request, use one bullet per supplied candidate when possible; "
+        "display_symbols must include all supplied candidates in deterministic order."
+    )
     prompt = ChatPromptTemplate.from_messages(
         [
-            (
-                "system",
-                "You are CSP Research Bot, a bounded institutional-style CSP research assistant. Use only the supplied "
-                "deterministic market context and filing metadata. Explain and compare candidates, "
-                "but do not promise returns, tell the user what they should buy, or place trades. "
-                "For budget questions, discuss cash required and fit rather than directing an "
-                "investment. Never claim you read a filing body. Treat retrieved filings and news "
-                "as private research context: do not print source URLs, filing inventories, or a "
-                "citation list in the answer. Mention evidence only when its title/metadata signals "
-                "a material catalyst or risk such as earnings guidance, regulation, litigation, "
-                "financing, management changes, security incidents, or major product events. Briefly "
-                "state the implication without overstating what the metadata proves. Ignore routine "
-                "filings, generic price-move stories, and unrelated headlines. If no material item "
-                "is found, say that no material recent catalyst was identified. If evidence cannot "
-                "answer the question, say so. Return only selected tickers present in the evidence. "
-                "For puts, lower absolute delta and a lower strike are generally safer but offer "
-                "different premium; describe the tradeoff rather than declaring safety. Format "
-                "dates as Month day, year and contracts as 'TICKER · Month day, year · $strike put' "
-                "instead of displaying raw OCC symbols. Return between one and ten concise, "
-                "non-redundant bullet points. Keep every bullet under 240 characters. For a "
-                "discovery request, use one bullet per supplied candidate when possible; "
-                "display_symbols must include all supplied candidates in deterministic order.",
-            ),
+            ("system", system_prompt),
             (
                 "human",
-                "Current ticker: {symbol}\nQuestion: {question}\n"
+                "Question: {question}\n"
+                "Selected screener ticker (UI default only): {symbol}\n"
+                "Requested expiration: {requested_expiration}\n"
                 "Deterministic market context: {market_context}\n"
                 "Mandate and portfolio fit: {mandate}\n"
                 "Assignment stress scenarios: {scenarios}\n"
                 "Independent risk gate: {risk_decision}\n"
-                "Evidence dossier, including thesis/counter-thesis instructions: {dossier}",
+                "Evidence dossier: {dossier}",
             ),
         ]
     )
-    from langchain_openai import ChatOpenAI
-
     model = ChatOpenAI(
         model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), temperature=0
     ).with_structured_output(ResearchAnswer)
@@ -566,6 +763,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
             if state.get("discovery_requested") else state["symbol"],
             "question": state["question"],
             "evidence": state["evidence"],
+            "requested_expiration": state.get("requested_expiration") or "not specified",
             "market_context": state["market_context"],
             "mandate": state.get("mandate", {}),
             "scenarios": state.get("scenario_matrix", {}),
@@ -603,12 +801,11 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         {
             "label": next(
                 (
-                    f"{row.get('type', 'Filing')} · "
-                    f"{datetime.fromisoformat(str(row.get('date'))).strftime('%b %d, %Y')}"
+                    _evidence_label(row)
                     for row in state["evidence"]
                     if row.get("url") == url
                 ),
-                "Filing metadata",
+                "News",
             ),
             "url": url,
         }
@@ -630,12 +827,13 @@ def build_research_graph(load_explicit_market, discover_market):
 
     graph = StateGraph(ResearchState)
     graph.add_node("parse_question_and_profile", _parse_question_and_profile)
+    graph.add_node("classify_question_source", _classify_question_source)
     graph.add_node("load_explicit_ticker_market_data", load_explicit_market)
     graph.add_node("deterministic_universe_screen", discover_market)
     graph.add_node("market_data_quality_gate", _market_data_quality_gate)
     graph.add_node("deterministic_contract_eligibility", _deterministic_contract_eligibility)
     graph.add_node("portfolio_fit_and_assignment_stress", _portfolio_fit_and_stress)
-    graph.add_node("retrieve_yahoo_mcp_evidence", _retrieve)
+    graph.add_node("retrieve_tavily_news", _retrieve_tavily_news)
     graph.add_node("build_institutional_research_dossier", _assess_research_evidence)
     graph.add_node("independent_risk_veto", _independent_risk_gate)
     graph.add_node("develop_thesis_counterthesis_and_response", _answer)
@@ -643,10 +841,12 @@ def build_research_graph(load_explicit_market, discover_market):
     graph.add_node("prepare_screener_cards", _prepare_screener_cards)
     graph.add_node("record_decision_and_evals", _record_decision_and_evals)
     graph.add_edge(START, "parse_question_and_profile")
+    graph.add_edge("parse_question_and_profile", "classify_question_source")
     graph.add_conditional_edges(
-        "parse_question_and_profile",
-        _route_research_intent,
+        "classify_question_source",
+        _route_after_classify,
         {
+            "retrieve_tavily_news": "retrieve_tavily_news",
             "load_explicit_ticker_market_data": "load_explicit_ticker_market_data",
             "deterministic_universe_screen": "deterministic_universe_screen",
         },
@@ -655,8 +855,15 @@ def build_research_graph(load_explicit_market, discover_market):
     graph.add_edge("deterministic_universe_screen", "market_data_quality_gate")
     graph.add_edge("market_data_quality_gate", "deterministic_contract_eligibility")
     graph.add_edge("deterministic_contract_eligibility", "portfolio_fit_and_assignment_stress")
-    graph.add_edge("portfolio_fit_and_assignment_stress", "retrieve_yahoo_mcp_evidence")
-    graph.add_edge("retrieve_yahoo_mcp_evidence", "build_institutional_research_dossier")
+    graph.add_conditional_edges(
+        "portfolio_fit_and_assignment_stress",
+        _route_after_market,
+        {
+            "retrieve_tavily_news": "retrieve_tavily_news",
+            "build_institutional_research_dossier": "build_institutional_research_dossier",
+        },
+    )
+    graph.add_edge("retrieve_tavily_news", "build_institutional_research_dossier")
     graph.add_edge("build_institutional_research_dossier", "independent_risk_veto")
     graph.add_edge("independent_risk_veto", "develop_thesis_counterthesis_and_response")
     graph.add_edge("develop_thesis_counterthesis_and_response", "validate_grounding_and_citations")
@@ -666,17 +873,27 @@ def build_research_graph(load_explicit_market, discover_market):
     return graph.compile()
 
 
+def _evidence_scope(source_intent: str | None) -> str:
+    if source_intent == "news":
+        return "Tavily news via MCP"
+    if source_intent == "options":
+        return "Alpaca market data and deterministic screening"
+    return "Alpaca market data, deterministic screening, and Tavily news via MCP"
+
+
 class ResearchAgent:
     def __init__(
         self,
         market_context_loader: Callable[[str], dict[str, Any]],
         discovery_loader: Callable[[str], list[dict[str, Any]]],
+        ticker_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         if not os.getenv("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY is required for the Iteration 2 agent")
         self.tracing: TracingStatus = setup_tracing()
         self.market_context_loader = market_context_loader
         self.discovery_loader = discovery_loader
+        self.ticker_resolver = ticker_resolver or (lambda name: None)
         self.graph = build_research_graph(
             self._load_explicit_market, self._discover_market
         )
@@ -700,14 +917,36 @@ class ResearchAgent:
     def _load_explicit_market(self, state: ResearchState) -> dict[str, Any]:
         contexts: list[dict[str, Any]] = []
         warnings = list(state.get("warnings", []))
-        for symbol in state.get("symbols", [])[:5]:
+        symbols = list(state.get("symbols") or [])
+        for name in state.get("company_names") or []:
+            ticker = self.ticker_resolver(name)
+            if ticker and ticker not in symbols:
+                symbols.append(ticker)
+            elif not ticker:
+                warnings.append(f"Could not resolve {name} to a ticker for Alpaca.")
+        if not symbols and not state.get("company_names"):
+            current = str(state.get("symbol") or "").strip().upper()
+            if current:
+                symbols = [current]
+        expiration = None
+        raw_expiration = state.get("requested_expiration")
+        if raw_expiration:
             try:
-                contexts.append(self.market_context_loader(symbol))
+                expiration = date.fromisoformat(str(raw_expiration))
+            except ValueError:
+                warnings.append(f"Could not parse requested expiration {raw_expiration}.")
+        for symbol in symbols[:5]:
+            try:
+                try:
+                    contexts.append(self.market_context_loader(symbol, expiration))
+                except TypeError:
+                    contexts.append(self.market_context_loader(symbol))
             except Exception as exc:
                 warnings.append(f"{symbol} market data unavailable: {type(exc).__name__}")
         return {
             "market_context": contexts,
             "symbols": [row["symbol"] for row in contexts],
+            "symbol": contexts[0]["symbol"] if contexts else state.get("symbol"),
             "warnings": warnings,
         }
 
@@ -726,14 +965,7 @@ class ResearchAgent:
 
     @staticmethod
     def _symbols(current: str, question: str) -> list[str]:
-        ignored = {
-            "I", "A", "AN", "THE", "WHAT", "WHICH", "WHO", "WHERE", "WHEN",
-            "CSP", "DTE", "OTM", "ITM", "AI", "SEC", "ETF", "USD",
-        }
-        mentioned = [
-            token for token in re.findall(r"\b[A-Z]{1,5}\b", question)
-            if token not in ignored
-        ]
+        mentioned = extract_mentioned_tickers(question)
         ordered: list[str] = []
         for token in mentioned or [current]:
             if token not in ordered:
@@ -751,12 +983,9 @@ class ResearchAgent:
             "capital of", "capital is", "my capital", "budget of", "my budget",
             "medium risk", "high risk", "in a sector", "which sector",
         )
-        explicit = re.findall(r"\b[A-Z]{1,5}\b", question)
-        meaningful = [
-            token for token in explicit
-            if token not in {"I", "A", "CSP", "DTE", "AI", "SEC", "ETF", "USD"}
-        ]
-        return not meaningful and any(trigger in lowered for trigger in triggers)
+        if extract_mentioned_tickers(question) or extract_company_names(question):
+            return False
+        return any(trigger in lowered for trigger in triggers)
 
     def ask(self, symbol: str, question: str) -> dict[str, Any]:
         symbol = symbol.strip().upper()
@@ -790,15 +1019,15 @@ class ResearchAgent:
             )
         if result.get("display_symbols"):
             selected = result["display_symbols"][0]
+        source_intent = result.get("source_intent", "both")
         return {
             "iteration": 2,
             "agent": "CSP Research Bot",
             "status": "live",
-            "evidence_scope": (
-                "Alpaca market data, deterministic screening, and Yahoo evidence via MCP"
-            ),
+            "source_intent": source_intent,
+            "evidence_scope": _evidence_scope(source_intent),
             "tracing_mode": self.tracing.mode,
-            "symbol": symbol,
+            "symbol": result.get("symbol") or (symbols[0] if symbols else symbol),
             "answer": result["answer"],
             "risk_level": result["risk_level"],
             "citations": result["citations"],
@@ -807,7 +1036,8 @@ class ResearchAgent:
             "risk_decision": result.get("risk_decision", {}),
             "audit_record": result.get("audit_record", {}),
             "ui_action": (
-                {"type": "load_options", "symbol": selected} if selected else None
+                {"type": "load_options", "symbol": selected}
+                if selected and source_intent != "news" else None
             ),
             "ui_candidates": result.get("ui_candidates", []),
         }

@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Protocol
 
-from .screen import rank_stock_candidates, select_csp_and_covered_calls
+from .screen import (
+    rank_stock_candidates,
+    select_csp_and_covered_calls,
+    select_quoted_contracts_for_expiration,
+)
 
 
 class MarketDataProvider(Protocol):
@@ -174,4 +178,55 @@ class IterationOneWorkflow:
         }
         with self._option_cache_lock:
             self._option_cache[symbol] = result
+        return result
+
+    def option_quotes(self, symbol: str, *, expiration: date) -> dict[str, object]:
+        """Return quoted contracts for one requested expiration, including short DTE."""
+        symbol = symbol.strip().upper()
+        cache_key = f"{symbol}:{expiration.isoformat()}"
+        with self._option_cache_lock:
+            cached = self._option_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        started = time.perf_counter()
+        trade = self.provider.latest_trade(symbol)
+        if trade is None:
+            raise ValueError(f"No latest trade found for {symbol}")
+        spot = float(trade.price)
+        snapshots = self.provider.option_chain(
+            symbol,
+            expiration_gte=expiration,
+            expiration_lte=expiration,
+            strike_gte=round(spot * 0.50, 2),
+            strike_lte=round(spot * 1.50, 2),
+        )
+        try:
+            expiry, rows = select_quoted_contracts_for_expiration(
+                snapshots, spot, expiration, count=self.config.contract_count
+            )
+        except ValueError:
+            expiry, rows = expiration, []
+        result: dict[str, object] = {
+            "iteration": 1,
+            "workflow": "python-deterministic",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "symbol": symbol,
+            "spot": spot,
+            "trade_timestamp": trade.timestamp.isoformat(),
+            "expiration": expiry.isoformat(),
+            "contracts": rows,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "source_count": len(snapshots),
+            "selection_method": (
+                f"Quoted Alpaca contracts for requested expiration {expiration.isoformat()}"
+            ),
+            "eligibility_rules": {
+                "dte": [0, 0],
+                "requested_expiration": expiration.isoformat(),
+                "minimum_bid": 0.05,
+                "maximum_spread_pct": 50.0,
+            },
+        }
+        with self._option_cache_lock:
+            self._option_cache[cache_key] = result
         return result

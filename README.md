@@ -89,17 +89,20 @@ one component without mixing its fixtures and assertions with another.
 - Git
 - An Alpaca Market Data API key and secret
 - Optional: an OpenAI API key for live agent responses
+- Optional: a Tavily API key for chat news retrieval
 - Optional: Arize space/API credentials for hosted tracing
 
 ## Get the API credentials
 
 Only Alpaca is required for the deterministic dashboard and ticker screener. OpenAI
-enables CSP Research Intelligence, and Arize enables hosted traces.
+enables CSP Research Intelligence. Tavily enables chat news retrieval. Arize enables
+hosted traces.
 
 | Service | Required? | Where to get it | Environment variables |
 |---|---|---|---|
 | Alpaca Market Data | Yes | Create an Alpaca account, open the developer/paper dashboard, and generate an API key pair. See [Alpaca authentication](https://docs.alpaca.markets/us/v1.1/docs/authentication-1) and [paper trading setup](https://docs.alpaca.markets/us/docs/paper-trading). | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` |
 | OpenAI API | For research/chat | Create a project API key from the [OpenAI API key page](https://platform.openai.com/api-keys). API billing is separate from a ChatGPT subscription; follow the [OpenAI developer quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). | `OPENAI_API_KEY`, `OPENAI_MODEL` |
+| Tavily | For chat news | Create an API key from the [Tavily dashboard](https://app.tavily.com/). Chat options questions still use Alpaca when this is blank. | `TAVILY_API_KEY` |
 | Arize AX | For hosted tracing | Create or open an Arize AX space, then go to **Settings → API Keys**. Copy the Current Space ID and generate an API key. See the [Arize tracing quickstart](https://arize.com/docs/ax/quickstarts). | `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, `ARIZE_PROJECT_NAME` |
 
 Keep all credentials in the local `.env` file. Do not paste them into source files,
@@ -160,6 +163,9 @@ ALPACA_SECRET_KEY=your_market_data_secret
 # Optional: enables CSP Research Intelligence and chat
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-mini
+
+# Optional: chat news retrieval via the local Tavily MCP server
+TAVILY_API_KEY=
 
 # Optional: exports LangChain/LangGraph traces to Arize AX
 ARIZE_SPACE_ID=

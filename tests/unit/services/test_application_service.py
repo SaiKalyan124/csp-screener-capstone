@@ -1,4 +1,12 @@
-from csp_screener.services.parsing import parse_budget, parse_requested_count
+from datetime import date
+
+from csp_screener.services.parsing import (
+    extract_company_names,
+    extract_mentioned_tickers,
+    parse_budget,
+    parse_expiration_date,
+    parse_requested_count,
+)
 
 
 def test_budget_parses_k_shorthand() -> None:
@@ -24,3 +32,24 @@ def test_requested_count_parses_numeric_stock_request() -> None:
 def test_requested_count_parses_words_and_caps_at_five() -> None:
     assert parse_requested_count("Give me ten stocks") == 5
     assert parse_requested_count("Give me five candidates") == 5
+
+
+def test_extract_company_names_finds_netflix_not_option_jargon() -> None:
+    assert extract_company_names(
+        "What's the Netflix secured put stock options premium for 09/04?"
+    ) == ["Netflix"]
+    assert extract_company_names(
+        "what is the netflix secured put premium for 09/04?"
+    ) == ["netflix"]
+    assert extract_mentioned_tickers(
+        "What's the Netflix secured put stock options premium for 09/04?"
+    ) == []
+
+
+def test_parse_expiration_date_reads_us_slash_dates() -> None:
+    assert parse_expiration_date(
+        "premium for 09/04?", today=date(2026, 9, 3)
+    ) == date(2026, 9, 4)
+    assert parse_expiration_date(
+        "NFLX Sep 4 puts", today=date(2026, 9, 3)
+    ) == date(2026, 9, 4)

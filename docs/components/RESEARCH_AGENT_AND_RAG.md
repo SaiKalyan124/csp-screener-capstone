@@ -14,8 +14,46 @@ Supported routes include:
 - compare supplied tickers;
 - discover affordable CSP candidates;
 - answer budget, risk, DTE, and delta questions;
-- retrieve company fundamentals, catalysts, and risks;
+- retrieve company news and financial analysis via Tavily for any stock or topic;
 - handle follow-up requests such as selecting a safer strike.
+
+## Chat source classifier
+
+The chat graph classifies each question before any provider call. This is a
+deterministic keyword node, not an unrestricted tool-calling agent. Chat research
+is not limited to the dashboard universe: Tavily receives the user's question as
+written. Alpaca option lookups resolve a named ticker or company name (for
+example Netflix → NFLX) and never fall back to the dashboard ticker when the
+question named a different company. Requested expirations such as `09/04` load
+that date's quotes instead of the 20–35 DTE screener window.
+
+| `source_intent` | When | Providers |
+|---|---|---|
+| `options` | CSP discovery or option jargon with no named company/ticker | Alpaca only |
+| `news` | news, headlines, earnings, or any other financial-analysis question | Tavily MCP, raw question |
+| `both` | named-company or named-ticker option questions, or contracts plus news | Alpaca then Tavily |
+
+Discovery questions are always at least `options`. News terms on a discovery
+question flip the intent to `both`. Missing `TAVILY_API_KEY` on a news or both
+route returns a warning and empty evidence; Alpaca results on `both` are kept.
+
+```mermaid
+flowchart TD
+    Parse[parse_question_and_profile] --> Classify[classify_question_source]
+    Classify --> Route{source_intent}
+    Route -->|options| AlpacaPath[Alpaca market data then eligibility]
+    Route -->|news| Tavily[retrieve_tavily_news]
+    Route -->|both| AlpacaPath
+    AlpacaPath --> AfterAlpaca{source_intent both?}
+    AfterAlpaca -->|yes| Tavily
+    AfterAlpaca -->|no| Dossier[build dossier then answer]
+    Tavily --> Dossier
+```
+
+News-only questions skip Alpaca and do not emit screener option cards. The
+independent risk gate does not veto news-only runs for missing market data or
+contracts. Dashboard shortlist classification still uses Yahoo MCP and is
+unchanged.
 
 ## Dashboard shortlist classification
 
@@ -52,7 +90,7 @@ in deterministic Python code and is not produced by the LLM.
 - earnings releases and investor-relations documents;
 - available earnings-call transcripts;
 - regulatory and legal updates;
-- reputable company and industry news.
+- reputable company and industry news retrieved by Tavily MCP for chat news questions.
 
 Structured prices, Greeks, ratios, dates, and technical indicators remain tool data rather than vector-store documents.
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from csp_screener.screen import (
@@ -7,6 +7,7 @@ from csp_screener.screen import (
     screen_chain,
     select_csp_and_covered_calls,
     select_demo_calls,
+    select_quoted_contracts_for_expiration,
 )
 
 
@@ -107,3 +108,15 @@ def test_contract_selection_filters_delta_and_ranks_quote_quality():
     assert len(rows) == 10
     assert all(0.15 <= abs(row["delta"]) <= 0.40 for row in rows)
     assert all(row["strike"] != 99.0 for row in rows)
+
+
+def test_select_quoted_contracts_for_expiration_does_not_require_five_each():
+    expiration = date(2026, 9, 4)
+    chain = {
+        "NFLX260904P00120000": snapshot(8.10, 8.40, delta=-0.35),
+        "NFLX260904C00130000": snapshot(2.10, 2.30, delta=0.22),
+    }
+    expiry, rows = select_quoted_contracts_for_expiration(chain, 125.0, expiration)
+    assert expiry == expiration
+    assert [row["strategy"] for row in rows] == ["Cash-secured put", "Covered call"]
+    assert rows[0]["bid"] == 8.10

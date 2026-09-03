@@ -26,14 +26,21 @@ class Settings:
     port: int = 8080
 
 
-def load_settings() -> Settings:
-    """Load local and optional shared credentials without leaking them to clients."""
-    load_dotenv(ROOT / ".env", override=False)
+def load_env_files() -> None:
+    """Load repo-root and nested .env files without overriding existing values."""
+    for path in (ROOT / ".env", ROOT / "csp-screener-capstone" / ".env"):
+        if path.is_file():
+            load_dotenv(path, override=False)
     shared_env = os.getenv("CSP_SHARED_ENV_FILE")
     if shared_env:
         shared = Path(shared_env).expanduser()
         if shared.exists():
             load_dotenv(shared, override=False)
+
+
+def load_settings() -> Settings:
+    """Load local and optional shared credentials without leaking them to clients."""
+    load_env_files()
     key = os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID")
     secret = os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
     if not key or not secret:

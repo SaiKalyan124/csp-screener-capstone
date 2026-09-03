@@ -234,7 +234,7 @@ async function askCspAnalyst(questionText) {
   userMessage.textContent = displayQuestion;
   const answerMessage = document.createElement("div");
   answerMessage.className = "assistant-message agent-response";
-  answerMessage.textContent = "Researching Yahoo evidence via MCP…";
+  answerMessage.textContent = "Researching…";
   chatMessages.append(userMessage, answerMessage);
   chatMessages.scrollTop = chatMessages.scrollHeight;
   chatForm.querySelector("button").disabled = true;
@@ -287,9 +287,8 @@ async function askCspAnalyst(questionText) {
       answerMessage.append(cards);
     }
     if (data.ui_action?.type === "load_options") {
+      activeSymbol = data.ui_action.symbol;
       input.value = data.ui_action.symbol;
-      showView("screener");
-      await loadChain(data.ui_action.symbol);
     }
   } catch (error) {
     answerMessage.textContent = error.message;

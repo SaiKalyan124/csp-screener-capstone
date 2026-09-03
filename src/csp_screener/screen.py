@@ -301,3 +301,84 @@ def select_csp_and_covered_calls(
         "No expiration has five eligible OTM puts and calls within the configured "
         "delta, bid, and spread rules"
     )
+
+
+def select_quoted_contracts_for_expiration(
+    snapshots: dict[str, Any],
+    spot: float,
+    expiration: date,
+    *,
+    count: int = 5,
+    min_bid: float = 0.05,
+    max_spread_pct: float = 50.0,
+    target_abs_delta: float = 0.25,
+) -> tuple[date, list[dict[str, Any]]]:
+    """Return quoted puts and calls for one expiration without the 5+5 screen."""
+    puts: list[dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
+    for symbol, snapshot in snapshots.items():
+        try:
+            _, expiry, contract_type, strike = parse_occ_symbol(symbol)
+        except (ValueError, IndexError):
+            continue
+        if expiry != expiration:
+            continue
+        quote = getattr(snapshot, "latest_quote", None)
+        if quote is None:
+            continue
+        bid = _number(getattr(quote, "bid_price", None))
+        ask = _number(getattr(quote, "ask_price", None))
+        if bid is None or ask is None or bid < min_bid or ask <= bid:
+            continue
+        midpoint = (bid + ask) / 2
+        spread_pct = (ask - bid) / midpoint * 100
+        if spread_pct > max_spread_pct:
+            continue
+        greeks = getattr(snapshot, "greeks", None)
+        delta = _number(getattr(greeks, "delta", None)) if greeks else None
+        row = {
+            "symbol": symbol,
+            "type": "Put" if contract_type == "P" else "Call",
+            "strike": strike,
+            "bid": bid,
+            "ask": ask,
+            "implied_volatility": _number(
+                getattr(snapshot, "implied_volatility", None)
+            ),
+            "delta": delta,
+            "distance_pct": round((strike - spot) / spot * 100, 2),
+            "midpoint": round(midpoint, 4),
+            "spread_pct": round(spread_pct, 2),
+            "premium_yield_pct": round(midpoint / strike * 100, 2),
+            "eligibility": "quoted",
+            "rank_score": round(
+                max(0.0, 1 - abs(abs(delta or target_abs_delta) - target_abs_delta) / 0.25)
+                * 100
+            ),
+            "rank_reason": f"Quoted {expiry.isoformat()} contract from Alpaca.",
+        }
+        if contract_type == "P":
+            row["strategy"] = "Cash-secured put"
+            row["moneyness"] = "OTM" if strike < spot else "ITM"
+            puts.append(row)
+        elif contract_type == "C":
+            row["strategy"] = "Covered call"
+            row["moneyness"] = "OTM" if strike > spot else "ITM"
+            calls.append(row)
+
+    def _rank(rows: list[dict[str, Any]], *, otm_first: bool) -> list[dict[str, Any]]:
+        return sorted(
+            rows,
+            key=lambda row: (
+                0 if (row["strike"] < spot if otm_first else row["strike"] > spot) else 1,
+                -row["rank_score"],
+                -row["premium_yield_pct"],
+                row["strike"] if otm_first else -row["strike"],
+            ),
+        )[:count]
+
+    otm_puts = [row for row in puts if row["strike"] < spot]
+    selected = _rank(otm_puts or puts, otm_first=True) + _rank(calls, otm_first=False)
+    if not selected:
+        raise ValueError(f"No quoted option contracts for {expiration.isoformat()}")
+    return expiration, selected

@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from datetime import date
+
 from ..config import Settings
 from ..agents import ResearchAgent
 from ..providers import AlpacaMarketDataProvider, YahooFinanceMCPClient
@@ -15,11 +17,11 @@ class ApplicationService:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        provider = AlpacaMarketDataProvider(
+        self.provider = AlpacaMarketDataProvider(
             settings.alpaca_key, settings.alpaca_secret
         )
         self.workflow = IterationOneWorkflow(
-            provider, IterationOneConfig(universe=settings.universe)
+            self.provider, IterationOneConfig(universe=settings.universe)
         )
         self._screen_cache: dict[str, object] | None = None
         self._research_screen_cache: dict[str, object] | None = None
@@ -28,7 +30,9 @@ class ApplicationService:
         self._stop_refresh = threading.Event()
         try:
             self.agent: ResearchAgent | None = ResearchAgent(
-                self.agent_market_context, self.discover_agent_candidates
+                self.agent_market_context,
+                self.discover_agent_candidates,
+                self.provider.resolve_company_ticker,
             )
         except RuntimeError:
             # Deterministic screening remains usable when the optional model is
@@ -100,8 +104,14 @@ class ApplicationService:
     def stop_background_refresh(self) -> None:
         self._stop_refresh.set()
 
-    def agent_market_context(self, symbol: str) -> dict[str, object]:
-        options = self.workflow.options(symbol)
+    def agent_market_context(
+        self, symbol: str, expiration: date | None = None
+    ) -> dict[str, object]:
+        options = (
+            self.workflow.option_quotes(symbol, expiration=expiration)
+            if expiration is not None
+            else self.workflow.options(symbol)
+        )
         ranking = next(
             (
                 row for row in self.screen().get("candidates", [])
@@ -140,7 +150,12 @@ class ApplicationService:
             "expiration": options["expiration"],
             "stock_ranking": ranking,
             "contracts": contracts,
-            "source": "Alpaca market data plus deterministic calculations",
+            "source": (
+                f"Alpaca quotes for {expiration.isoformat()}"
+                if expiration is not None
+                else "Alpaca market data plus deterministic calculations"
+            ),
+            "requested_expiration": expiration.isoformat() if expiration else None,
         }
 
     def discover_agent_candidates(self, question: str) -> list[dict[str, object]]:

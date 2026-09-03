@@ -1,13 +1,22 @@
+from datetime import date
+
 import pytest
 
 from csp_screener.iteration2 import (
     ResearchAnswer,
     ResearchAgent,
     _answer,
+    _classify_question_source,
+    _independent_risk_gate,
     _parse_question_and_profile,
     _prepare_eligible_shortlist,
+    _prepare_screener_cards,
     _retrieve,
+    _retrieve_tavily_news,
+    _route_after_classify,
+    _route_after_market,
     _route_research_intent,
+    classify_source_intent,
     _validate_grounding_and_citations,
     _validate_shortlist_classification,
 )
@@ -70,6 +79,37 @@ def test_agent_extracts_multiple_tickers_for_comparison():
     assert ResearchAgent._symbols(
         "MU", "Screen these tickers for CSP: NVDA, AMD, INTC."
     ) == ["NVDA", "AMD", "INTC"]
+
+
+def test_news_question_routes_to_tavily_without_rewriting_the_company():
+    state = _classified("MU", "What is the latest news of Apple?")
+    assert state["symbol"] == "MU"
+    assert state["company_names"] == ["Apple"]
+    assert state["source_intent"] == "news"
+    assert _route_after_classify(state) == "retrieve_tavily_news"
+
+
+def test_explicit_market_loader_uses_resolved_company_not_dashboard_ticker():
+    agent = ResearchAgent.__new__(ResearchAgent)
+    loaded: list[tuple[str, date | None]] = []
+
+    def loader(symbol, expiration=None):
+        loaded.append((symbol, expiration))
+        return {"symbol": symbol, "spot": 100, "contracts": []}
+
+    agent.market_context_loader = loader
+    agent.ticker_resolver = lambda name: "NFLX" if name.lower() == "netflix" else None
+    result = agent._load_explicit_market({
+        "symbol": "MU",
+        "symbols": [],
+        "company_names": ["Netflix"],
+        "requested_expiration": "2026-09-04",
+        "warnings": [],
+    })
+    assert result["symbols"] == ["NFLX"]
+    assert result["symbol"] == "NFLX"
+    assert loaded == [("NFLX", date(2026, 9, 4))]
+    assert not any(symbol == "MU" for symbol, _ in loaded)
 
 
 def test_agent_detects_budget_request_as_discovery():
@@ -201,3 +241,109 @@ def test_shortlist_evaluations_preserve_eligibility_scores_and_citations():
         "score_integrity": 1.0,
         "contract_eligibility_integrity": 1.0,
     }
+
+
+def _classified(symbol: str, question: str) -> dict:
+    parsed = _parse_question_and_profile({"symbol": symbol, "question": question})
+    return {**parsed, **_classify_question_source(parsed)}
+
+
+def test_classifier_routes_option_questions_to_alpaca():
+    state = _classified("MU", "Show me CSP puts and the option chain.")
+    assert classify_source_intent(state["question"], discovery=True) == "options"
+    assert classify_source_intent(
+        "Show me CSP puts and the option chain for MU.", named_subject=True
+    ) == "both"
+
+
+def test_classifier_routes_named_company_options_through_alpaca_and_tavily():
+    state = _classified(
+        "MU", "What's the Netflix secured put stock options premium for 09/04?"
+    )
+    assert state["company_names"] == ["Netflix"]
+    assert state["symbols"] == []
+    assert state["source_intent"] == "both"
+    lowered = _classified(
+        "MU", "what is the netflix secured put premium for 09/04?"
+    )
+    assert lowered["company_names"] == ["netflix"]
+    assert lowered["source_intent"] == "both"
+    assert _route_after_classify(state) == "load_explicit_ticker_market_data"
+    assert _route_after_market(state) == "retrieve_tavily_news"
+
+
+def test_classifier_routes_news_questions_to_tavily():
+    state = _classified("MU", "What is the latest news for MU?")
+    assert state["source_intent"] == "news"
+    assert _route_after_classify(state) == "retrieve_tavily_news"
+
+
+def test_classifier_routes_mixed_questions_through_alpaca_then_tavily():
+    state = _classified("MU", "Latest news and CSP candidates for MU")
+    assert state["source_intent"] == "both"
+    assert _route_after_classify(state) == "load_explicit_ticker_market_data"
+    assert _route_after_market(state) == "retrieve_tavily_news"
+
+
+def test_classifier_keeps_discovery_on_alpaca_options_path():
+    state = _classified("MU", "Give me top 3 CSP ideas with $50,000.")
+    assert state["source_intent"] == "options"
+    assert _route_after_classify(state) == "deterministic_universe_screen"
+    assert _route_after_market(state) == "build_institutional_research_dossier"
+
+
+def test_classifier_defaults_general_research_to_tavily():
+    assert classify_source_intent("What should I know about MU?") == "news"
+    assert classify_source_intent("Analyze Boeing's latest earnings.") == "news"
+    state = _classified("MU", "What is the latest news of Apple?")
+    assert _route_after_classify(state) == "retrieve_tavily_news"
+
+
+def test_news_only_risk_gate_does_not_veto_missing_contracts():
+    result = _independent_risk_gate({
+        "source_intent": "news",
+        "data_quality": {},
+        "eligibility_ledger": [],
+        "portfolio_fit": {},
+        "research_dossier": {"coverage": "sufficient"},
+    })["risk_decision"]
+    assert result["status"] == "pass"
+    assert "no_eligible_contracts" not in result["reason_codes"]
+    assert "insufficient_market_data" not in result["reason_codes"]
+
+
+def test_tavily_retrieval_sends_the_raw_question(monkeypatch):
+    class FakeTavilyClient:
+        def search_news(self, query, max_results):
+            assert query == "What is the latest news of Apple?"
+            assert max_results == 5
+            return {
+                "query": query,
+                "news": [{
+                    "type": "News",
+                    "title": "Apple reports earnings",
+                    "url": "https://example.test/apple",
+                }],
+            }
+
+    monkeypatch.setattr("csp_screener.iteration2.TavilyMCPClient", FakeTavilyClient)
+    result = _retrieve_tavily_news({
+        "symbol": "MU",
+        "question": "What is the latest news of Apple?",
+        "warnings": [],
+    })
+    assert result["evidence"][0]["title"] == "Apple reports earnings"
+    assert result["evidence"][0]["url"] == "https://example.test/apple"
+
+
+def test_news_only_screener_cards_are_empty():
+    result = _prepare_screener_cards({
+        "source_intent": "news",
+        "symbol": "MU",
+        "symbols": ["MU"],
+        "display_symbols": ["MU"],
+        "market_context": [],
+        "answer": "- MU reported earnings.",
+    })
+    assert result["ui_candidates"] == []
+    assert result["display_symbols"] == ["MU"]
