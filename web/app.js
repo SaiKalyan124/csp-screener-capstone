@@ -12,6 +12,10 @@ const authStatus = document.querySelector("#auth-status");
 const signOutButton = document.querySelector("#sign-out");
 let supabaseClient = null;
 let accessToken = null;
+let currentSession = null;
+let authRequired = false;
+let pendingTrade = null;
+let portfolioPositions = [];
 
 function readableUserName(session) {
   const user = session?.user;
@@ -42,6 +46,7 @@ async function apiFetch(url, options = {}) {
 }
 
 function showAuthenticated(session) {
+  currentSession = session;
   accessToken = session?.access_token || null;
   const signedIn = Boolean(session);
   authGate.hidden = signedIn;
@@ -55,11 +60,13 @@ async function initializeAuth() {
     const response = await fetch("/api/runtime-config");
     const config = await response.json();
     if (!config.auth_required) {
+      authRequired = false;
       authGate.hidden = true;
       document.querySelector(".app-shell").hidden = false;
       runStockScreen(false);
       return;
     }
+    authRequired = true;
     supabaseClient = window.supabase.createClient(
       config.supabase_url,
       config.supabase_anon_key,
@@ -81,14 +88,17 @@ async function initializeAuth() {
 }
 const dashboardView = document.querySelector("#dashboard-view");
 const screenerView = document.querySelector("#screener-view");
+const portfolioView = document.querySelector("#portfolio-view");
 const dashboardNav = document.querySelector("#dashboard-nav");
 const screenerNav = document.querySelector("#screener-nav");
+const portfolioNav = document.querySelector("#portfolio-nav");
 const dashboardRun = document.querySelector("#dashboard-run");
 const dashboardEmpty = document.querySelector("#dashboard-empty");
 const dashboardResults = document.querySelector("#dashboard-results");
 let dashboardResearchStatus = "pending";
 let activeSymbol = "";
 let firstDashboardSymbol = "";
+let currentChain = null;
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const number = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -128,9 +138,11 @@ function renderRow(row, index) {
     <td><span class="money ${row.type.toLowerCase()}">${row.strategy}</span> <small>Score ${row.rank_score} · ${row.distance_pct > 0 ? "+" : ""}${row.distance_pct}%</small></td>
     <td class="contract"><strong></strong><small></small></td><td class="number">${number.format(row.strike)}</td>
     <td class="number">${number.format(row.bid)}</td><td class="number">${number.format(row.ask)}</td>
-    <td class="number optional">${iv}</td><td class="number optional">${delta}</td>`;
+    <td class="number optional">${iv}</td><td class="number optional">${delta}</td>
+    <td><button class="track-trade" type="button">Track trade</button></td>`;
   tr.querySelector(".contract strong").textContent = readableContract(row);
   tr.querySelector(".contract small").textContent = row.symbol;
+  tr.querySelector(".track-trade").addEventListener("click", () => openTradeDialog(row));
   return tr;
 }
 
@@ -167,11 +179,171 @@ function renderCandidate(candidate, index) {
 
 function showView(view) {
   const dashboardIsActive = view === "dashboard";
+  const screenerIsActive = view === "screener";
+  const portfolioIsActive = view === "portfolio";
   dashboardView.hidden = !dashboardIsActive;
-  screenerView.hidden = dashboardIsActive;
+  screenerView.hidden = !screenerIsActive;
+  portfolioView.hidden = !portfolioIsActive;
   dashboardNav.classList.toggle("active", dashboardIsActive);
-  screenerNav.classList.toggle("active", !dashboardIsActive);
-  history.replaceState(null, "", dashboardIsActive ? "#dashboard" : "#screener");
+  screenerNav.classList.toggle("active", screenerIsActive);
+  portfolioNav.classList.toggle("active", portfolioIsActive);
+  history.replaceState(null, "", `#${view}`);
+  if (portfolioIsActive) loadPortfolio(false);
+}
+
+const tradeDialog = document.querySelector("#trade-dialog");
+const tradeForm = document.querySelector("#trade-form");
+const portfolioBody = document.querySelector("#portfolio-body");
+const portfolioStatus = document.querySelector("#portfolio-status");
+
+function localPortfolioKey() {
+  return "csp-paper-portfolio-local-demo";
+}
+
+function localPositions() {
+  try { return JSON.parse(localStorage.getItem(localPortfolioKey()) || "[]"); }
+  catch { return []; }
+}
+
+function saveLocalPositions(rows) {
+  localStorage.setItem(localPortfolioKey(), JSON.stringify(rows));
+}
+
+async function listPositions() {
+  if (!authRequired) return localPositions();
+  const { data, error } = await supabaseClient
+    .from("paper_option_positions")
+    .select("*")
+    .order("opened_at", { ascending: false });
+  if (error) throw new Error(`Portfolio could not be loaded: ${error.message}`);
+  return data || [];
+}
+
+async function insertPosition(position) {
+  if (!authRequired) {
+    const row = { ...position, id: crypto.randomUUID(), user_id: "local-demo" };
+    saveLocalPositions([row, ...localPositions()]);
+    return row;
+  }
+  const payload = { ...position, user_id: currentSession.user.id };
+  const { data, error } = await supabaseClient
+    .from("paper_option_positions")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw new Error(`Position could not be saved: ${error.message}`);
+  return data;
+}
+
+async function updatePosition(id, changes) {
+  if (!authRequired) {
+    const rows = localPositions().map((row) => row.id === id ? { ...row, ...changes } : row);
+    saveLocalPositions(rows);
+    return;
+  }
+  const { error } = await supabaseClient
+    .from("paper_option_positions")
+    .update(changes)
+    .eq("id", id);
+  if (error) throw new Error(`Position could not be updated: ${error.message}`);
+}
+
+function openTradeDialog(row) {
+  pendingTrade = row;
+  document.querySelector("#trade-contract").textContent = `${activeSymbol} · ${readableContract(row)}`;
+  const action = document.querySelector("#trade-action");
+  action.value = "SELL_TO_OPEN";
+  document.querySelector("#trade-quantity").value = "1";
+  document.querySelector("#trade-price").value = Number(row.bid).toFixed(2);
+  document.querySelector("#trade-warning").textContent = row.type === "Call"
+    ? "Share ownership is not tracked yet. This short call will be marked coverage unverified."
+    : `Gross CSP collateral per contract: ${money.format(row.strike * 100)}.`;
+  tradeDialog.showModal();
+}
+
+function positionPnl(row) {
+  if (row.status === "CLOSED") return Number(row.realized_pnl || 0);
+  const entry = Number(row.entry_price);
+  const mark = Number(row.current_mark ?? entry);
+  const direction = row.opening_action === "SELL_TO_OPEN" ? 1 : -1;
+  return (entry - mark) * Number(row.quantity) * Number(row.multiplier || 100) * direction;
+}
+
+function renderPortfolioRow(row) {
+  const tr = document.createElement("tr");
+  const pnl = positionPnl(row);
+  const collateral = row.opening_action === "SELL_TO_OPEN" && row.option_type === "PUT" && row.status === "OPEN"
+    ? Number(row.strike) * Number(row.multiplier || 100) * Number(row.quantity) : 0;
+  tr.innerHTML = `<td class="contract"><strong></strong><small></small></td><td><strong>${row.opening_action === "SELL_TO_OPEN" ? "Sell to open" : "Buy to open"}</strong><small class="position-detail">${row.quantity} contract${Number(row.quantity) === 1 ? "" : "s"}${collateral ? ` · ${money.format(collateral)} collateral` : ""}</small></td><td><strong>${money.format(row.entry_price)} → ${money.format(row.current_mark ?? row.entry_price)}</strong><small class="position-detail">per share</small></td><td class="number portfolio-pnl ${pnl >= 0 ? "gain" : "loss"}">${money.format(pnl)}</td><td><span class="position-status">${row.status}</span></td>`;
+  tr.querySelector(".contract strong").textContent = `${row.underlying} · ${new Date(`${row.expiration}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · ${money.format(row.strike)} ${row.option_type.toLowerCase()}`;
+  tr.querySelector(".contract small").textContent = row.contract_symbol;
+  if (row.status === "OPEN") {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "close-position";
+    close.textContent = row.opening_action === "SELL_TO_OPEN" ? "Buy to close" : "Sell to close";
+    close.addEventListener("click", () => closePosition(row));
+    tr.lastElementChild.append(document.createElement("br"), close);
+  }
+  return tr;
+}
+
+function updatePortfolioSummary(rows) {
+  const open = rows.filter((row) => row.status === "OPEN");
+  const closed = rows.filter((row) => row.status === "CLOSED");
+  const openPnl = open.reduce((sum, row) => sum + positionPnl(row), 0);
+  const realized = closed.reduce((sum, row) => sum + Number(row.realized_pnl || 0), 0);
+  const collateral = open.reduce((sum, row) => sum + (
+    row.opening_action === "SELL_TO_OPEN" && row.option_type === "PUT"
+      ? Number(row.strike) * Number(row.multiplier || 100) * Number(row.quantity) : 0
+  ), 0);
+  document.querySelector("#portfolio-open-count").textContent = String(open.length);
+  document.querySelector("#portfolio-open-pnl").textContent = money.format(openPnl);
+  document.querySelector("#portfolio-realized-pnl").textContent = money.format(realized);
+  document.querySelector("#portfolio-collateral").textContent = money.format(collateral);
+}
+
+async function refreshPositionMarks(rows) {
+  const open = rows.filter((row) => row.status === "OPEN");
+  const byUnderlying = [...new Set(open.map((row) => row.underlying))];
+  for (const symbol of byUnderlying) {
+    try {
+      const response = await apiFetch(`/api/options?symbol=${encodeURIComponent(symbol)}`);
+      if (!response.ok) continue;
+      const chain = await response.json();
+      for (const position of open.filter((row) => row.underlying === symbol)) {
+        const quote = chain.contracts.find((row) => row.symbol === position.contract_symbol);
+        if (!quote) continue;
+        position.current_mark = position.opening_action === "SELL_TO_OPEN" ? quote.ask : quote.bid;
+        position.quote_as_of = chain.trade_timestamp;
+        await updatePosition(position.id, { current_mark: position.current_mark, quote_as_of: position.quote_as_of });
+      }
+    } catch { /* Preserve the last known mark and surface partial freshness below. */ }
+  }
+  return rows;
+}
+
+async function loadPortfolio(refresh = false) {
+  portfolioStatus.textContent = refresh ? "Refreshing current option marks…" : "";
+  try {
+    portfolioPositions = await listPositions();
+    if (refresh && portfolioPositions.length) portfolioPositions = await refreshPositionMarks(portfolioPositions);
+    portfolioBody.replaceChildren(...portfolioPositions.map(renderPortfolioRow));
+    document.querySelector("#portfolio-empty").hidden = portfolioPositions.length > 0;
+    document.querySelector("#portfolio-table-wrap").hidden = portfolioPositions.length === 0;
+    updatePortfolioSummary(portfolioPositions);
+    portfolioStatus.textContent = refresh ? "Marks refreshed where the saved contract remained in the eligible chain." : "";
+  } catch (error) { portfolioStatus.textContent = error.message; }
+}
+
+async function closePosition(row) {
+  const exit = Number(row.current_mark ?? row.entry_price);
+  const direction = row.opening_action === "SELL_TO_OPEN" ? 1 : -1;
+  const realized = (Number(row.entry_price) - exit) * Number(row.quantity) * Number(row.multiplier || 100) * direction;
+  try {
+    await updatePosition(row.id, { status: "CLOSED", exit_price: exit, realized_pnl: realized, closed_at: new Date().toISOString() });
+    await loadPortfolio(false);
+  } catch (error) { portfolioStatus.textContent = error.message; }
 }
 
 async function runStockScreen(force = false) {
@@ -213,6 +385,7 @@ async function loadChain(symbol) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The option chain could not be loaded.");
     activeSymbol = data.symbol;
+    currentChain = data;
     input.value = data.symbol;
     document.querySelector("#context-symbol").textContent = data.symbol;
     document.querySelector("#context-price").textContent = money.format(data.spot);
@@ -275,8 +448,58 @@ screenerNav.addEventListener("click", (event) => {
   event.preventDefault();
   showView("screener");
 });
+portfolioNav.addEventListener("click", (event) => {
+  event.preventDefault();
+  showView("portfolio");
+});
+document.querySelector("#portfolio-refresh").addEventListener("click", () => loadPortfolio(true));
 
-showView(location.hash === "#screener" ? "screener" : "dashboard");
+document.querySelector("#trade-cancel").addEventListener("click", () => tradeDialog.close());
+document.querySelector("#trade-cancel-x").addEventListener("click", () => tradeDialog.close());
+document.querySelector("#trade-action").addEventListener("change", (event) => {
+  if (!pendingTrade) return;
+  document.querySelector("#trade-price").value = Number(
+    event.target.value === "SELL_TO_OPEN" ? pendingTrade.bid : pendingTrade.ask
+  ).toFixed(2);
+});
+tradeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!pendingTrade || !currentChain) return;
+  const openingAction = document.querySelector("#trade-action").value;
+  const quantity = Number(document.querySelector("#trade-quantity").value);
+  const entryPrice = Number(document.querySelector("#trade-price").value);
+  if (!Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(entryPrice) || entryPrice < 0) {
+    document.querySelector("#trade-warning").textContent = "Enter a positive whole-number quantity and a valid price.";
+    return;
+  }
+  const now = new Date().toISOString();
+  const position = {
+    underlying: activeSymbol,
+    contract_symbol: pendingTrade.symbol,
+    option_type: pendingTrade.type.toUpperCase(),
+    strategy: pendingTrade.type === "Put" && openingAction === "SELL_TO_OPEN" ? "CSP" : pendingTrade.strategy,
+    opening_action: openingAction,
+    quantity,
+    multiplier: 100,
+    strike: Number(pendingTrade.strike),
+    expiration: currentChain.expiration,
+    entry_price: entryPrice,
+    entry_bid: Number(pendingTrade.bid),
+    entry_ask: Number(pendingTrade.ask),
+    entry_underlying_price: Number(currentChain.spot),
+    current_mark: Number(openingAction === "SELL_TO_OPEN" ? pendingTrade.ask : pendingTrade.bid),
+    quote_as_of: currentChain.trade_timestamp || now,
+    status: "OPEN",
+    opened_at: now,
+  };
+  try {
+    await insertPosition(position);
+    tradeDialog.close();
+    showView("portfolio");
+  } catch (error) { document.querySelector("#trade-warning").textContent = error.message; }
+});
+
+showView(location.hash === "#portfolio" ? "portfolio" : location.hash === "#screener" ? "screener" : "dashboard");
 initializeAuth();
 
 const chatForm = document.querySelector("#chat-form");
