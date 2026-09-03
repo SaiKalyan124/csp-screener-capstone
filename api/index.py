@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import re
+import sys
 from functools import lru_cache
+from pathlib import Path
+
+# Vercel installs third-party dependencies from pyproject.toml but executes the
+# function from the repository root without installing this src-layout package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
