@@ -6,6 +6,62 @@ const status = document.querySelector("#form-status");
 const empty = document.querySelector("#empty-state");
 const tableWrap = document.querySelector("#table-wrap");
 const body = document.querySelector("#chain-body");
+const authGate = document.querySelector("#auth-gate");
+const authForm = document.querySelector("#auth-form");
+const authStatus = document.querySelector("#auth-status");
+const signOutButton = document.querySelector("#sign-out");
+let supabaseClient = null;
+let accessToken = null;
+
+async function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 && supabaseClient) {
+    authGate.hidden = false;
+    document.querySelector(".app-shell").hidden = true;
+    signOutButton.hidden = true;
+  }
+  return response;
+}
+
+function showAuthenticated(session) {
+  accessToken = session?.access_token || null;
+  const signedIn = Boolean(session);
+  authGate.hidden = signedIn;
+  document.querySelector(".app-shell").hidden = !signedIn;
+  signOutButton.hidden = !signedIn;
+}
+
+async function initializeAuth() {
+  try {
+    const response = await fetch("/api/runtime-config");
+    const config = await response.json();
+    if (!config.auth_required) {
+      authGate.hidden = true;
+      document.querySelector(".app-shell").hidden = false;
+      runStockScreen(false);
+      return;
+    }
+    supabaseClient = window.supabase.createClient(
+      config.supabase_url,
+      config.supabase_anon_key,
+      { auth: { persistSession: true, autoRefreshToken: true } },
+    );
+    const { data } = await supabaseClient.auth.getSession();
+    showAuthenticated(data.session);
+    if (data.session) runStockScreen(false);
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      const wasSignedOut = !accessToken;
+      showAuthenticated(session);
+      if (session && wasSignedOut) runStockScreen(false);
+    });
+  } catch (error) {
+    authStatus.textContent = "Authentication could not be initialized.";
+    authGate.hidden = false;
+    document.querySelector(".app-shell").hidden = true;
+  }
+}
 const dashboardView = document.querySelector("#dashboard-view");
 const screenerView = document.querySelector("#screener-view");
 const dashboardNav = document.querySelector("#dashboard-nav");
@@ -107,7 +163,7 @@ async function runStockScreen(force = false) {
   try {
     const params = new URLSearchParams({ research: "1" });
     if (force) params.set("refresh", "1");
-    const response = await fetch(`/api/screen?${params}`);
+    const response = await apiFetch(`/api/screen?${params}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The stock screen could not be completed.");
     dashboardResearchStatus = data.research_status || "not_requested";
@@ -134,7 +190,7 @@ async function loadChain(symbol) {
   button.querySelector("span").textContent = "Loading…";
   status.textContent = "";
   try {
-    const response = await fetch(`/api/options?symbol=${encodeURIComponent(symbol)}`);
+    const response = await apiFetch(`/api/options?symbol=${encodeURIComponent(symbol)}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The option chain could not be loaded.");
     activeSymbol = data.symbol;
@@ -202,7 +258,7 @@ screenerNav.addEventListener("click", (event) => {
 });
 
 showView(location.hash === "#dashboard" ? "dashboard" : "screener");
-runStockScreen(false);
+initializeAuth();
 
 const chatForm = document.querySelector("#chat-form");
 const chatQuestion = document.querySelector("#chat-question");
@@ -239,7 +295,7 @@ async function askCspAnalyst(questionText) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
   chatForm.querySelector("button").disabled = true;
   try {
-    const response = await fetch("/api/chat", {
+    const response = await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol, question }),
@@ -308,6 +364,35 @@ chatForm.addEventListener("submit", (event) => {
   const question = chatQuestion.value;
   chatQuestion.value = "";
   askCspAnalyst(question);
+});
+
+authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  authStatus.textContent = "Signing in…";
+  const email = document.querySelector("#auth-email").value.trim();
+  const password = document.querySelector("#auth-password").value;
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  authStatus.textContent = error ? error.message : "";
+});
+
+document.querySelector("#sign-up").addEventListener("click", async () => {
+  authStatus.textContent = "Creating account…";
+  const email = document.querySelector("#auth-email").value.trim();
+  const password = document.querySelector("#auth-password").value;
+  if (!email || password.length < 6) {
+    authStatus.textContent = "Enter an email and a password of at least six characters.";
+    return;
+  }
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  authStatus.textContent = error
+    ? error.message
+    : data.session
+      ? ""
+      : "Check your email to confirm the account, then sign in.";
+});
+
+signOutButton.addEventListener("click", async () => {
+  await supabaseClient?.auth.signOut();
 });
 
 const appShell = document.querySelector(".app-shell");

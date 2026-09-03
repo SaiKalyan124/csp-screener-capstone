@@ -20,6 +20,10 @@ DEFAULT_UNIVERSE = (
 class Settings:
     alpaca_key: str
     alpaca_secret: str
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_anon_key: str | None = None
+    auth_required: bool = False
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     refresh_seconds: int = 900
     host: str = "127.0.0.1"
@@ -38,4 +42,11 @@ def load_settings() -> Settings:
     secret = os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
     if not key or not secret:
         raise RuntimeError("Alpaca credentials are missing from the configured environment")
-    return Settings(alpaca_key=key, alpaca_secret=secret)
+    return Settings(
+        alpaca_key=key,
+        alpaca_secret=secret,
+        supabase_url=os.getenv("SUPABASE_URL") or None,
+        supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY") or None,
+        supabase_anon_key=os.getenv("SUPABASE_ANON_KEY") or None,
+        auth_required=os.getenv("AUTH_REQUIRED", "false").lower() in {"1", "true", "yes"},
+    )

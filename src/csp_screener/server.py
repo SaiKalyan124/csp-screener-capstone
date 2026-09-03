@@ -30,6 +30,9 @@ class DemoHandler(SimpleHTTPRequestHandler):
                 research = query.get("research", ["0"])[0].lower() in {"1", "true", "yes"}
                 self._send_json(self.service.screen(force=force, research=research))
                 return
+            if parsed.path == "/api/runtime-config":
+                self._send_json({"auth_required": False})
+                return
             if parsed.path == "/api/options":
                 symbol = query.get("symbol", [""])[0].strip().upper()
                 if not SYMBOL_RE.fullmatch(symbol):
