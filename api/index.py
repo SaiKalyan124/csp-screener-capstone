@@ -10,9 +10,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from csp_screener.config import load_settings
+from csp_screener.config import WEB_ROOT, load_settings
 from csp_screener.services import ApplicationService
 
 
@@ -31,6 +32,21 @@ def get_service() -> ApplicationService:
 
 
 app = FastAPI(title="CSP Screener Capstone", docs_url=None, redoc_url=None)
+
+
+@app.get("/", include_in_schema=False)
+def home() -> FileResponse:
+    return FileResponse(WEB_ROOT / "index.html")
+
+
+@app.get("/styles.css", include_in_schema=False)
+def styles() -> FileResponse:
+    return FileResponse(WEB_ROOT / "styles.css", media_type="text/css")
+
+
+@app.get("/app.js", include_in_schema=False)
+def javascript() -> FileResponse:
+    return FileResponse(WEB_ROOT / "app.js", media_type="application/javascript")
 
 
 @app.get("/api/health")
