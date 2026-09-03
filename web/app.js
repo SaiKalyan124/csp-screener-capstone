@@ -502,6 +502,10 @@ tradeForm.addEventListener("submit", async (event) => {
     await insertPosition(position);
     tradeDialog.close();
     showView("portfolio");
+    // A hosted PostgREST read can briefly lag the successful insert response.
+    // Reconcile once more so the saved position is visible without manual navigation.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await loadPortfolio(false);
   } catch (error) { document.querySelector("#trade-warning").textContent = error.message; }
 });
 
