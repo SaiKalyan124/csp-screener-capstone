@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..config import Settings
 from ..agents import ResearchAgent
-from ..providers import AlpacaMarketDataProvider, YahooFinanceMCPClient
+from ..providers import AlpacaMarketDataProvider, SupabaseStateStore, YahooFinanceMCPClient
 from ..workflows import IterationOneConfig, IterationOneWorkflow
 from ..parsing import parse_budget, parse_requested_count
 
@@ -26,6 +26,13 @@ class ApplicationService:
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._stop_refresh = threading.Event()
+        self.state_store = (
+            SupabaseStateStore(
+                settings.supabase_url, settings.supabase_service_role_key
+            )
+            if settings.supabase_url and settings.supabase_service_role_key
+            else None
+        )
         try:
             self.agent: ResearchAgent | None = ResearchAgent(
                 self.agent_market_context, self.discover_agent_candidates
@@ -48,6 +55,19 @@ class ApplicationService:
             cached = self._research_screen_cache if research else self._screen_cache
             if cached is not None and not force:
                 return {**cached, "cache_status": "hit"}
+
+        if self.state_store is not None and not force:
+            try:
+                persisted = self.state_store.latest_screen(research)
+                if persisted is not None:
+                    with self._cache_lock:
+                        if research:
+                            self._research_screen_cache = persisted
+                        else:
+                            self._screen_cache = persisted
+                    return {**persisted, "cache_status": "supabase"}
+            except Exception as exc:
+                print(f"[demo] Supabase cache read failed: {type(exc).__name__}")
 
         # Cache hits never wait for a network refresh. Refresh misses are coalesced.
         with self._refresh_lock:
@@ -75,14 +95,25 @@ class ApplicationService:
                     self._research_screen_cache = result
                 else:
                     self._screen_cache = result
-                return {**result, "cache_status": "refreshed"}
+            if self.state_store is not None:
+                try:
+                    self.state_store.save_screen(result, research)
+                except Exception as exc:
+                    print(f"[demo] Supabase cache write failed: {type(exc).__name__}")
+            return {**result, "cache_status": "refreshed"}
 
     def research(self, symbol: str, question: str) -> dict[str, object]:
         if self.agent is None:
             raise RuntimeError(
                 "Research agent is unavailable; configure OPENAI_API_KEY to enable it."
             )
-        return self.agent.ask(symbol, question)
+        response = self.agent.ask(symbol, question)
+        if self.state_store is not None:
+            try:
+                self.state_store.save_research(symbol, question, response)
+            except Exception as exc:
+                print(f"[demo] Supabase research write failed: {type(exc).__name__}")
+        return response
 
     def start_background_refresh(self) -> None:
         def loop() -> None:
