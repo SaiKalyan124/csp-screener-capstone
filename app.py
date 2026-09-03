@@ -17,14 +17,67 @@ from pydantic import BaseModel
 
 from csp_screener.config import WEB_ROOT, load_settings
 from csp_screener.services import ApplicationService
+from csp_screener.profiles import normalize_profile
 
 
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 
+class ProfileInput(BaseModel):
+    mode: str = "guided"
+    risk_level: str = "medium"
+    available_capital: float = 50_000
+    dte_min: int = 20
+    dte_max: int = 35
+    delta_min: float = 0.20
+    delta_max: float = 0.30
+    max_allocation_pct: float = 30
+    max_spread_pct: float = 20
+    avoid_earnings: bool = True
+
+    def as_rules(self) -> dict[str, object]:
+        try:
+            return normalize_profile(self.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 class ChatRequest(BaseModel):
     symbol: str
     question: str
+    profile: ProfileInput | None = None
+
+
+class ProfileRecommendationRequest(BaseModel):
+    description: str
+    available_capital: float
+    current_profile: ProfileInput | None = None
+
+
+def profile_from_query(
+    mode: str = Query(default="guided"),
+    risk_level: str = Query(default="medium"),
+    available_capital: float = Query(default=50_000),
+    dte_min: int = Query(default=20),
+    dte_max: int = Query(default=35),
+    delta_min: float = Query(default=0.20),
+    delta_max: float = Query(default=0.30),
+    max_allocation_pct: float = Query(default=30),
+    max_spread_pct: float = Query(default=20),
+    avoid_earnings: bool = Query(default=True),
+) -> dict[str, object]:
+    return ProfileInput(
+        mode=mode,
+        risk_level=risk_level,
+        available_capital=available_capital,
+        dte_min=dte_min,
+        dte_max=dte_max,
+        delta_min=delta_min,
+        delta_max=delta_max,
+        max_allocation_pct=max_allocation_pct,
+        max_spread_pct=max_spread_pct,
+        avoid_earnings=avoid_earnings,
+    ).as_rules()
 
 
 @lru_cache(maxsize=1)
@@ -99,21 +152,26 @@ def runtime_config() -> dict[str, object]:
 def screen(
     refresh: bool = Query(default=False),
     research: bool = Query(default=False),
+    profile: dict[str, object] = Depends(profile_from_query),
     _: None = Depends(require_user),
 ) -> dict[str, object]:
     try:
-        return get_service().screen(force=refresh, research=research)
+        return get_service().screen(force=refresh, research=research, profile=profile)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/options")
-def options(symbol: str = Query(...), _: None = Depends(require_user)) -> dict[str, object]:
+def options(
+    symbol: str = Query(...),
+    profile: dict[str, object] = Depends(profile_from_query),
+    _: None = Depends(require_user),
+) -> dict[str, object]:
     normalized = symbol.strip().upper()
     if not SYMBOL_RE.fullmatch(normalized):
         raise HTTPException(status_code=400, detail="Enter a valid ticker symbol.")
     try:
-        return get_service().options(normalized)
+        return get_service().options(normalized, profile=profile)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -127,8 +185,27 @@ def chat(payload: ChatRequest, _: None = Depends(require_user)) -> dict[str, obj
     if not question:
         raise HTTPException(status_code=400, detail="Question is required.")
     try:
-        return get_service().research(symbol, question)
+        profile = payload.profile.as_rules() if payload.profile else ProfileInput().as_rules()
+        return get_service().research(symbol, question, profile=profile)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/profile/recommend")
+def recommend_profile(
+    payload: ProfileRecommendationRequest,
+    _: None = Depends(require_user),
+) -> dict[str, object]:
+    try:
+        current = payload.current_profile.as_rules() if payload.current_profile else None
+        return get_service().recommend_profile(
+            payload.description.strip(), payload.available_capital, current
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

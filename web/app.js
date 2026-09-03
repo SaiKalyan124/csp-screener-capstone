@@ -16,6 +16,8 @@ let currentSession = null;
 let authRequired = false;
 let pendingTrade = null;
 let portfolioPositions = [];
+let activeProfile = null;
+let profileLoadedForUser = null;
 
 function readableUserName(session) {
   const user = session?.user;
@@ -63,6 +65,7 @@ async function initializeAuth() {
       authRequired = false;
       authGate.hidden = true;
       document.querySelector(".app-shell").hidden = false;
+      await loadUserProfile();
       runStockScreen(false);
       return;
     }
@@ -75,14 +78,14 @@ async function initializeAuth() {
     const { data } = await supabaseClient.auth.getSession();
     showAuthenticated(data.session);
     if (data.session) {
-      runStockScreen(false);
+      await Promise.allSettled([loadUserProfile(), runStockScreen(false)]);
       if (location.hash === "#portfolio") loadPortfolio(false);
     }
     supabaseClient.auth.onAuthStateChange((_event, session) => {
       const wasSignedOut = !accessToken;
       showAuthenticated(session);
       if (session && wasSignedOut) {
-        runStockScreen(false);
+        Promise.allSettled([loadUserProfile(), runStockScreen(false)]);
         if (location.hash === "#portfolio") loadPortfolio(false);
       }
     });
@@ -95,9 +98,13 @@ async function initializeAuth() {
 const dashboardView = document.querySelector("#dashboard-view");
 const screenerView = document.querySelector("#screener-view");
 const portfolioView = document.querySelector("#portfolio-view");
+const profileView = document.querySelector("#profile-view");
+const dashboardEligibilityCopy = document.querySelector("#dashboard-view .card-heading p");
+if (dashboardEligibilityCopy) dashboardEligibilityCopy.textContent = "Every row has at least five eligible CSP contracts; covered calls and capital fit are shown as context.";
 const dashboardNav = document.querySelector("#dashboard-nav");
 const screenerNav = document.querySelector("#screener-nav");
 const portfolioNav = document.querySelector("#portfolio-nav");
+const profileNav = document.querySelector("#profile-nav");
 const dashboardRun = document.querySelector("#dashboard-run");
 const dashboardEmpty = document.querySelector("#dashboard-empty");
 const dashboardResults = document.querySelector("#dashboard-results");
@@ -173,7 +180,16 @@ function renderCandidate(candidate, index) {
     <span class="candidate-score">${candidate.score}</span>`;
   row.querySelector(".candidate-symbol strong").textContent = candidate.symbol;
   row.querySelector(".candidate-symbol small").textContent = money.format(candidate.price);
-  row.querySelector(".candidate-reason span").textContent = candidate.research_reason || candidate.reason;
+  const collateral = candidate.minimum_csp_collateral;
+  const positionLimit = candidate.profile_position_limit;
+  const capitalNote = candidate.capital_fit === "fits"
+    ? `CSP collateral ${money.format(collateral)} fits the profile limit`
+    : candidate.capital_fit === "exceeds_limit"
+      ? `CSP collateral ${money.format(collateral)} exceeds the ${money.format(positionLimit)} profile limit`
+      : collateral != null
+        ? `Minimum CSP collateral ${money.format(collateral)}`
+        : "Capital fit not available";
+  row.querySelector(".candidate-reason span").textContent = `${capitalNote} · ${candidate.research_reason || candidate.reason}`;
   row.addEventListener("click", async () => {
     showView("screener");
     input.value = candidate.symbol;
@@ -187,12 +203,15 @@ function showView(view) {
   const dashboardIsActive = view === "dashboard";
   const screenerIsActive = view === "screener";
   const portfolioIsActive = view === "portfolio";
+  const profileIsActive = view === "profile";
   dashboardView.hidden = !dashboardIsActive;
   screenerView.hidden = !screenerIsActive;
   portfolioView.hidden = !portfolioIsActive;
+  profileView.hidden = !profileIsActive;
   dashboardNav.classList.toggle("active", dashboardIsActive);
   screenerNav.classList.toggle("active", screenerIsActive);
   portfolioNav.classList.toggle("active", portfolioIsActive);
+  profileNav.classList.toggle("active", profileIsActive);
   history.replaceState(null, "", `#${view}`);
   if (portfolioIsActive) loadPortfolio(false);
 }
@@ -314,7 +333,7 @@ async function refreshPositionMarks(rows) {
   const byUnderlying = [...new Set(open.map((row) => row.underlying))];
   for (const symbol of byUnderlying) {
     try {
-      const response = await apiFetch(`/api/options?symbol=${encodeURIComponent(symbol)}`);
+      const response = await apiFetch(`/api/options?${profileQuery(symbol)}`);
       if (!response.ok) continue;
       const chain = await response.json();
       for (const position of open.filter((row) => row.underlying === symbol)) {
@@ -357,11 +376,12 @@ async function runStockScreen(force = false) {
   dashboardRun.textContent = "Screening…";
   status.textContent = "";
   try {
-    const params = new URLSearchParams({ research: "1" });
+    const params = profileQuery();
+    params.set("research", "1");
     if (force) params.set("refresh", "1");
     const response = await apiFetch(`/api/screen?${params}`);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "The stock screen could not be completed.");
+    if (!response.ok) throw new Error(data.error || data.detail || "The stock screen could not be completed.");
     dashboardResearchStatus = data.research_status || "not_requested";
     firstDashboardSymbol = data.candidates[0]?.symbol || "";
     dashboardResults.replaceChildren(
@@ -387,9 +407,9 @@ async function loadChain(symbol) {
   button.querySelector("span").textContent = "Loading…";
   status.textContent = "";
   try {
-    const response = await apiFetch(`/api/options?symbol=${encodeURIComponent(symbol)}`);
+    const response = await apiFetch(`/api/options?${profileQuery(symbol)}`);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "The option chain could not be loaded.");
+    if (!response.ok) throw new Error(data.error || data.detail || "The option chain could not be loaded.");
     activeSymbol = data.symbol;
     currentChain = data;
     input.value = data.symbol;
@@ -414,7 +434,7 @@ async function loadChain(symbol) {
   } catch (error) {
     const isEligibilityRejection = error.message.includes("No expiration has five eligible");
     status.textContent = isEligibilityRejection
-      ? `${symbol} does not meet the screener’s current eligibility criteria. No expiration has at least five quoted OTM puts and five quoted OTM calls after the delta, bid, and spread filters. This is a current-data result and may change as prices and liquidity update.`
+      ? `${symbol} excluded by the active profile: ${error.message}`
       : error.message;
     if (isEligibilityRejection) {
       document.querySelector("#context-symbol").textContent = symbol;
@@ -457,6 +477,10 @@ screenerNav.addEventListener("click", (event) => {
 portfolioNav.addEventListener("click", (event) => {
   event.preventDefault();
   showView("portfolio");
+});
+profileNav.addEventListener("click", (event) => {
+  event.preventDefault();
+  showView("profile");
 });
 document.querySelector("#portfolio-refresh").addEventListener("click", () => loadPortfolio(true));
 
@@ -509,7 +533,293 @@ tradeForm.addEventListener("submit", async (event) => {
   } catch (error) { document.querySelector("#trade-warning").textContent = error.message; }
 });
 
-showView(location.hash === "#portfolio" ? "portfolio" : location.hash === "#screener" ? "screener" : "dashboard");
+const PROFILE_PRESETS = {
+  low: { dteMin: 30, dteMax: 45, deltaMin: 0.10, deltaMax: 0.20, allocation: 20, spread: 15, avoidEarnings: true },
+  medium: { dteMin: 20, dteMax: 35, deltaMin: 0.20, deltaMax: 0.30, allocation: 30, spread: 20, avoidEarnings: true },
+  high: { dteMin: 14, dteMax: 45, deltaMin: 0.30, deltaMax: 0.40, allocation: 40, spread: 25, avoidEarnings: false },
+};
+
+const profileForm = document.querySelector("#profile-form");
+profileForm.querySelector('[name="profile-mode"][value="guided"]').closest("label").lastChild.textContent = " Recommended presets";
+const profileActions = profileForm.querySelector(".profile-actions");
+profileActions.insertAdjacentHTML("beforebegin", `
+  <section class="profile-advisor" aria-labelledby="profile-advisor-title">
+    <div><span class="eyebrow">LLM PROFILE ADVISOR</span><h3 id="profile-advisor-title">Describe what feels comfortable</h3><p>The LLM interprets your preferences. Python validates every proposed limit before you can apply it.</p></div>
+    <label for="profile-advisor-input">Goals and risk preferences</label>
+    <textarea id="profile-advisor-input" rows="3" maxlength="800" placeholder="Example: I want monthly income, prefer a lower chance of assignment, and want to avoid earnings events."></textarea>
+    <div class="advisor-actions"><button id="profile-advisor-run" type="button" class="secondary-button">Recommend settings</button><span id="profile-advisor-status" role="status"></span></div>
+    <div id="profile-advisor-result" class="advisor-result" hidden><strong id="advisor-result-title"></strong><p id="advisor-result-rules"></p><ul id="advisor-result-reasons"></ul><p id="advisor-guardrail-note"></p><button id="profile-advisor-apply" type="button">Apply recommendation</button></div>
+  </section>
+`);
+let pendingProfileRecommendation = null;
+const PROFILE_FIELD_HELP = {
+  "profile-capital": "Total cash available for fully securing put contracts.",
+  "profile-dte-min": "DTE means days to expiration; this is the shortest contract duration allowed.",
+  "profile-dte-max": "DTE means days to expiration; this is the longest contract duration allowed.",
+  "profile-delta-min": "Lowest absolute option delta allowed; lower delta generally means less assignment probability.",
+  "profile-delta-max": "Highest absolute option delta allowed; higher delta generally brings more premium and assignment risk.",
+  "profile-allocation": "Maximum percentage of your capital that one cash-secured put may reserve.",
+  "profile-spread": "Widest allowed bid/ask spread as a percentage of the option midpoint; lower is more liquid.",
+  "profile-avoid-earnings": "Prefer expirations without a company earnings announcement before the option expires.",
+};
+
+Object.entries(PROFILE_FIELD_HELP).forEach(([id, help]) => {
+  const control = document.querySelector(`#${id}`);
+  control.title = help;
+  control.closest("label")?.setAttribute("title", help);
+  control.setAttribute("aria-description", help);
+});
+const customProfileFields = document.querySelector("#custom-profile-fields");
+
+function selectedProfileMode() {
+  return profileForm.elements["profile-mode"].value;
+}
+
+function selectedRiskLevel() {
+  return profileForm.elements["risk-level"].value;
+}
+
+function applyPresetToFields(level) {
+  const preset = PROFILE_PRESETS[level];
+  document.querySelector("#profile-dte-min").value = preset.dteMin;
+  document.querySelector("#profile-dte-max").value = preset.dteMax;
+  document.querySelector("#profile-delta-min").value = preset.deltaMin.toFixed(2);
+  document.querySelector("#profile-delta-max").value = preset.deltaMax.toFixed(2);
+  document.querySelector("#profile-allocation").value = preset.allocation;
+  document.querySelector("#profile-spread").value = preset.spread;
+  document.querySelector("#profile-avoid-earnings").checked = preset.avoidEarnings;
+}
+
+function currentProfilePreview() {
+  const mode = selectedProfileMode();
+  const level = selectedRiskLevel();
+  const preset = mode === "guided" ? PROFILE_PRESETS[level] : null;
+  return {
+    mode,
+    label: mode === "guided" ? `${level[0].toUpperCase()}${level.slice(1)} risk` : "Custom profile",
+    capital: Number(document.querySelector("#profile-capital").value),
+    dteMin: preset?.dteMin ?? Number(document.querySelector("#profile-dte-min").value),
+    dteMax: preset?.dteMax ?? Number(document.querySelector("#profile-dte-max").value),
+    deltaMin: preset?.deltaMin ?? Number(document.querySelector("#profile-delta-min").value),
+    deltaMax: preset?.deltaMax ?? Number(document.querySelector("#profile-delta-max").value),
+    allocation: preset?.allocation ?? Number(document.querySelector("#profile-allocation").value),
+    spread: preset?.spread ?? Number(document.querySelector("#profile-spread").value),
+    avoidEarnings: preset?.avoidEarnings ?? document.querySelector("#profile-avoid-earnings").checked,
+  };
+}
+
+function renderProfilePreview(updateApplicationSummary = false) {
+  const profile = currentProfilePreview();
+  document.querySelector("#profile-preview-title").textContent = profile.label;
+  document.querySelector("#profile-preview-summary").textContent = `${money.format(profile.capital)} capital · ${profile.dteMin}–${profile.dteMax} DTE · |Δ| ${profile.deltaMin.toFixed(2)}–${profile.deltaMax.toFixed(2)}`;
+  document.querySelector("#profile-preview-allocation").textContent = `Maximum ${profile.allocation}% allocation per position`;
+  document.querySelector("#profile-preview-earnings").textContent = profile.avoidEarnings ? "Avoid earnings before expiration" : "Earnings overlap allowed with warning";
+  if (updateApplicationSummary) {
+    document.querySelector("#sidebar-risk").textContent = profile.label;
+    document.querySelector("#sidebar-dte").textContent = `${profile.dteMin}–${profile.dteMax} DTE`;
+    document.querySelector("#dashboard-profile-risk").textContent = profile.label;
+    document.querySelector("#dashboard-profile-rules").textContent = `${profile.dteMin}–${profile.dteMax} DTE · |Δ| ${profile.deltaMin.toFixed(2)}–${profile.deltaMax.toFixed(2)}`;
+  }
+}
+
+function localProfileKey() {
+  return "csp-user-profile-local-demo";
+}
+
+function populateProfileForm(profile) {
+  const mode = profile.mode === "custom" ? "custom" : "guided";
+  const level = PROFILE_PRESETS[profile.riskLevel] ? profile.riskLevel : "medium";
+  profileForm.querySelector(`[name="profile-mode"][value="${mode}"]`).checked = true;
+  profileForm.querySelector(`[name="risk-level"][value="${level}"]`).checked = true;
+  document.querySelector("#profile-capital").value = profile.capital;
+  document.querySelector("#profile-dte-min").value = profile.dteMin;
+  document.querySelector("#profile-dte-max").value = profile.dteMax;
+  document.querySelector("#profile-delta-min").value = Number(profile.deltaMin).toFixed(2);
+  document.querySelector("#profile-delta-max").value = Number(profile.deltaMax).toFixed(2);
+  document.querySelector("#profile-allocation").value = profile.allocation;
+  document.querySelector("#profile-spread").value = profile.spread;
+  document.querySelector("#profile-avoid-earnings").checked = profile.avoidEarnings;
+  customProfileFields.hidden = mode !== "custom";
+  customProfileFields.disabled = mode !== "custom";
+  document.querySelector("#risk-presets").classList.toggle("disabled", mode === "custom");
+  renderProfilePreview(true);
+}
+
+function normalizeStoredProfile(row) {
+  const level = PROFILE_PRESETS[row?.risk_level] ? row.risk_level : "medium";
+  const preset = PROFILE_PRESETS[level];
+  return {
+    mode: row?.mode === "custom" ? "custom" : "guided",
+    riskLevel: level,
+    capital: Number(row?.available_capital ?? 50000),
+    dteMin: Number(row?.dte_min ?? preset.dteMin),
+    dteMax: Number(row?.dte_max ?? preset.dteMax),
+    deltaMin: Number(row?.delta_min ?? preset.deltaMin),
+    deltaMax: Number(row?.delta_max ?? preset.deltaMax),
+    allocation: Number(row?.max_allocation_pct ?? preset.allocation),
+    spread: Number(row?.max_spread_pct ?? preset.spread),
+    avoidEarnings: row?.avoid_earnings ?? preset.avoidEarnings,
+  };
+}
+
+function profileRequestPayload() {
+  const preview = activeProfile || currentProfilePreview();
+  return {
+    mode: preview.mode,
+    risk_level: preview.riskLevel || selectedRiskLevel(),
+    available_capital: preview.capital,
+    dte_min: preview.dteMin,
+    dte_max: preview.dteMax,
+    delta_min: preview.deltaMin,
+    delta_max: preview.deltaMax,
+    max_allocation_pct: preview.allocation,
+    max_spread_pct: preview.spread,
+    avoid_earnings: preview.avoidEarnings,
+  };
+}
+
+function profileQuery(symbol = null) {
+  const params = new URLSearchParams(profileRequestPayload());
+  if (symbol) params.set("symbol", symbol);
+  return params;
+}
+
+async function loadUserProfile() {
+  const userKey = authRequired ? currentSession?.user?.id : "local-demo";
+  if (!userKey || profileLoadedForUser === userKey) return activeProfile;
+  const started = performance.now();
+  let stored = null;
+  if (authRequired) {
+    const { data, error } = await supabaseClient
+      .from("user_profiles")
+      .select("mode,risk_level,available_capital,dte_min,dte_max,delta_min,delta_max,max_allocation_pct,max_spread_pct,avoid_earnings")
+      .maybeSingle();
+    if (error) throw new Error(`Profile could not be loaded: ${error.message}`);
+    stored = data;
+  } else {
+    try { stored = JSON.parse(localStorage.getItem(localProfileKey()) || "null"); }
+    catch { stored = null; }
+  }
+  activeProfile = normalizeStoredProfile(stored);
+  profileLoadedForUser = userKey;
+  populateProfileForm(activeProfile);
+  document.querySelector("#profile-status").textContent = stored
+    ? `Saved profile loaded in ${Math.round(performance.now() - started)} ms.`
+    : "Using recommended defaults. Save to create your profile.";
+  return activeProfile;
+}
+
+async function saveUserProfile(profile) {
+  const row = {
+    mode: profile.mode,
+    risk_level: selectedRiskLevel(),
+    available_capital: profile.capital,
+    dte_min: profile.dteMin,
+    dte_max: profile.dteMax,
+    delta_min: profile.deltaMin,
+    delta_max: profile.deltaMax,
+    max_allocation_pct: profile.allocation,
+    max_spread_pct: profile.spread,
+    avoid_earnings: profile.avoidEarnings,
+    updated_at: new Date().toISOString(),
+  };
+  if (authRequired) {
+    const { data, error } = await supabaseClient
+      .from("user_profiles")
+      .upsert({ ...row, user_id: currentSession.user.id }, { onConflict: "user_id" })
+      .select()
+      .single();
+    if (error) throw new Error(`Profile could not be saved: ${error.message}`);
+    return normalizeStoredProfile(data);
+  }
+  localStorage.setItem(localProfileKey(), JSON.stringify(row));
+  return normalizeStoredProfile(row);
+}
+
+profileForm.elements["profile-mode"].forEach((control) => control.addEventListener("change", () => {
+  const custom = selectedProfileMode() === "custom";
+  customProfileFields.hidden = !custom;
+  customProfileFields.disabled = !custom;
+  document.querySelector("#risk-presets").classList.toggle("disabled", custom);
+  renderProfilePreview();
+}));
+profileForm.elements["risk-level"].forEach((control) => control.addEventListener("change", () => {
+  if (selectedProfileMode() === "guided") applyPresetToFields(selectedRiskLevel());
+  renderProfilePreview();
+}));
+profileForm.addEventListener("input", () => renderProfilePreview());
+profileForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const profile = currentProfilePreview();
+  if (profile.dteMin > profile.dteMax || profile.deltaMin > profile.deltaMax) {
+    document.querySelector("#profile-status").textContent = "Minimum values must not exceed maximum values.";
+    return;
+  }
+  const statusNode = document.querySelector("#profile-status");
+  const started = performance.now();
+  statusNode.textContent = "Saving profile…";
+  try {
+    activeProfile = await saveUserProfile(profile);
+    profileLoadedForUser = authRequired ? currentSession.user.id : "local-demo";
+    populateProfileForm(activeProfile);
+    statusNode.textContent = `Profile saved in ${Math.round(performance.now() - started)} ms. Screening and research now use these rules.`;
+  } catch (error) { statusNode.textContent = error.message; }
+});
+
+document.querySelector("#profile-advisor-run").addEventListener("click", async () => {
+  const description = document.querySelector("#profile-advisor-input").value.trim();
+  const advisorStatus = document.querySelector("#profile-advisor-status");
+  const advisorResult = document.querySelector("#profile-advisor-result");
+  if (description.length < 20) {
+    advisorStatus.textContent = "Add a little more detail about your goals and risk tolerance.";
+    return;
+  }
+  advisorStatus.textContent = "Analyzing preferences…";
+  advisorResult.hidden = true;
+  try {
+    const response = await apiFetch("/api/profile/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description, available_capital: Number(document.querySelector("#profile-capital").value), current_profile: profileRequestPayload() }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || data.detail || "A recommendation could not be generated.");
+    pendingProfileRecommendation = data.recommendation;
+    const recommendation = data.recommendation;
+    document.querySelector("#advisor-result-title").textContent = `${recommendation.risk_level[0].toUpperCase()}${recommendation.risk_level.slice(1)}-risk recommendation`;
+    document.querySelector("#advisor-result-rules").textContent = `${recommendation.dte_min}–${recommendation.dte_max} DTE · |Δ| ${Number(recommendation.delta_min).toFixed(2)}–${Number(recommendation.delta_max).toFixed(2)} · ${recommendation.max_allocation_pct}% maximum allocation`;
+    document.querySelector("#advisor-result-reasons").replaceChildren(...recommendation.rationale.map((reason) => { const item = document.createElement("li"); item.textContent = reason; return item; }));
+    document.querySelector("#advisor-guardrail-note").textContent = data.guardrails.status === "adjusted" ? `Python adjusted ${data.guardrails.adjustments.length} value(s) to approved boundaries.` : "Python validation passed. Nothing has been saved.";
+    advisorResult.hidden = false;
+    advisorStatus.textContent = "Recommendation ready for your review.";
+  } catch (error) { advisorStatus.textContent = error.message; }
+});
+
+document.querySelector("#profile-advisor-apply").addEventListener("click", () => {
+  if (!pendingProfileRecommendation) return;
+  const recommendation = pendingProfileRecommendation;
+  profileForm.querySelector('[name="profile-mode"][value="custom"]').checked = true;
+  profileForm.querySelector(`[name="risk-level"][value="${recommendation.risk_level}"]`).checked = true;
+  document.querySelector("#profile-dte-min").value = recommendation.dte_min;
+  document.querySelector("#profile-dte-max").value = recommendation.dte_max;
+  document.querySelector("#profile-delta-min").value = Number(recommendation.delta_min).toFixed(2);
+  document.querySelector("#profile-delta-max").value = Number(recommendation.delta_max).toFixed(2);
+  document.querySelector("#profile-allocation").value = recommendation.max_allocation_pct;
+  document.querySelector("#profile-spread").value = recommendation.max_spread_pct;
+  document.querySelector("#profile-avoid-earnings").checked = recommendation.avoid_earnings;
+  customProfileFields.hidden = false;
+  customProfileFields.disabled = false;
+  document.querySelector("#risk-presets").classList.add("disabled");
+  renderProfilePreview();
+  document.querySelector("#profile-status").textContent = "Recommendation applied to the form but not saved. Review it, then select Save profile.";
+});
+applyPresetToFields("medium");
+renderProfilePreview(true);
+
+const initialView = location.hash === "#portfolio" ? "portfolio"
+  : location.hash === "#profile" ? "profile"
+    : location.hash === "#screener" ? "screener" : "dashboard";
+showView(initialView);
 initializeAuth();
 
 const chatForm = document.querySelector("#chat-form");
@@ -557,10 +867,10 @@ async function askCspAnalyst(questionText) {
     const response = await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, question }),
+      body: JSON.stringify({ symbol, question, profile: profileRequestPayload() }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "CSP Research Bot could not answer.");
+    if (!response.ok) throw new Error(data.error || data.detail || "CSP Research Bot could not answer.");
     answerMessage.textContent = "";
     const bulletList = document.createElement("ul");
     bulletList.className = "chat-bullets";

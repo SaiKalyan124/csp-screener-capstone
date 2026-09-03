@@ -5,6 +5,7 @@ from csp_screener.iteration2 import (
     ResearchAgent,
     _answer,
     _parse_question_and_profile,
+    _prepare_screener_cards,
     _prepare_eligible_shortlist,
     _retrieve,
     _route_research_intent,
@@ -111,6 +112,27 @@ def test_graph_parser_routes_discovery_and_extracts_budget():
     assert _route_research_intent(state) == "deterministic_universe_screen"
 
 
+def test_graph_parser_uses_profile_position_limit_when_question_has_no_budget():
+    state = _parse_question_and_profile({
+        "symbol": "MU",
+        "question": "What do you think of MU?",
+        "profile": {
+            "mode": "custom",
+            "risk_level": "low",
+            "available_capital": 80_000,
+            "max_allocation_pct": 25,
+            "dte_min": 30,
+            "dte_max": 45,
+            "delta_min": 0.10,
+            "delta_max": 0.20,
+            "avoid_earnings": True,
+        },
+    })
+    assert state["budget"] == 20_000
+    assert state["mandate"]["risk_tolerance"] == "low"
+    assert state["mandate"]["delta_range"] == [0.10, 0.20]
+
+
 def test_retrieval_fetches_evidence_for_every_market_candidate(monkeypatch):
     class FakeYahooClient:
         def company_evidence_batch(self, symbols, filing_limit, news_limit):
@@ -152,6 +174,22 @@ def test_discovery_cards_keep_all_requested_candidates():
         "selected_symbol": "NFLX",
     })
     assert result["display_symbols"] == ["NFLX", "MSFT", "META", "AVGO", "INTC"]
+
+
+def test_excluded_ticker_does_not_create_actionable_zero_price_card():
+    result = _prepare_screener_cards({
+        "answer": "- AAPL exceeds the active profile position limit.",
+        "display_symbols": ["AAPL"],
+        "market_context": [{
+            "symbol": "AAPL",
+            "spot": None,
+            "contracts": [],
+            "eligibility": "excluded",
+            "rejection_reason": "Collateral exceeds the profile position limit.",
+        }],
+    })
+
+    assert result["ui_candidates"] == []
 
 
 def test_dashboard_graph_removes_ineligible_candidates_before_research():

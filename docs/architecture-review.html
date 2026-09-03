@@ -145,8 +145,6 @@
       <a href="#overview"><span>1</span>End-state overview</a>
       <a href="#iterations"><span>2</span>Iteration roadmap</a>
       <a href="#system"><span>3</span>System architecture</a>
-      <a href="#dashboard"><span>4</span>Dashboard sequence</a>
-      <a href="#ticker"><span>5</span>Ticker research</a>
       <a href="#rag"><span>6</span>Advanced RAG</a>
       <a href="#routing"><span>7</span>LangGraph routing</a>
       <a href="#memory"><span>8</span>Memory model</a>
@@ -160,7 +158,6 @@
     <header id="overview">
       <h1>CSP Screener — End-State Design</h1>
       <p>A reviewable architecture for deterministic options screening, evidence-grounded research, persistent context, measurable quality, and research-only safety boundaries.</p>
-      <div class="status"><span>Pending design review</span><span>Current and planned components marked</span><span>Architecture target—not task tracking</span></div>
     </header>
 
     <section id="iterations">
@@ -231,87 +228,7 @@ flowchart TB
       <div class="principles"><div class="principle"><b>Deterministic authority</b><p>Eligibility, scores, Greeks-derived values, affordability, and contract calculations are code controlled.</p></div><div class="principle"><b>Bounded intelligence</b><p>The model classifies the eligible Top 10, retrieves, compares, explains, and abstains. It cannot admit rejected candidates or rewrite formulas.</p></div><div class="principle"><b>Evidence before synthesis</b><p>Material claims must point to market state or retrieved passages with visible source and freshness.</p></div></div>
     </section>
 
-    <section id="dashboard">
-      <div class="section-head"><div class="num">3</div><h2>Dashboard screening and research sequence</h2><p>Code establishes eligibility and scores first; a bounded research pass then classifies only the deterministic Top 10.</p></div>
-      <div class="diagram"><pre class="mermaid">
-sequenceDiagram
-  autonumber
-  participant User
-  participant UI as Dashboard UI
-  participant API
-  participant App as Application service
-  participant Cache
-  participant Screen as Deterministic workflow
-  participant Provider as Alpaca provider/MCP
-  participant Research as Bounded research workflow
-  participant Evidence as Filings + news
-  participant Model as Structured LLM call
-  participant Arize
-  User->>UI: Open dashboard
-  UI->>API: GET /api/screen
-  API->>App: screen(force=false)
-  App->>Cache: Read latest validated snapshot
-  alt Fresh snapshot exists
-    Cache-->>App: Combined Top ten + research metadata
-  else Missing or manual refresh
-    App->>Screen: Run configured universe
-    Screen->>Provider: One batched daily-bars request
-    Provider-->>Screen: Timestamped bars
-    Screen->>Screen: Hard-filter and rank stock pool
-    Screen->>Provider: Validate bounded chains for ranked pool
-    Provider-->>Screen: Quotes · IV · Greeks · timestamps
-    Screen->>Screen: Require five eligible CSPs + five eligible calls
-    Screen-->>App: Fully eligible Top ten + cached chains
-    App->>Research: Invoke dashboard LangGraph
-    Research->>Evidence: Retrieve shortlist evidence in parallel
-    Evidence-->>Research: Filing metadata + news
-    Research->>Model: One LangChain structured-output call
-    Model-->>Research: Favorable · Watch · Avoid · Insufficient evidence
-    Research->>Research: Validate + run code-based evaluations
-    Research-->>App: Labels + citations + evaluation scores
-    App->>Cache: Atomically publish combined snapshot
-    Screen-->>Arize: Latency · counts · cache · errors
-    Research-->>Arize: Retrieval · model · classification · fallback
-  end
-  App-->>API: Screen response
-  API-->>UI: Scores + research labels + timestamps + warnings
-  UI-->>User: Render dashboard
-      </pre></div>
-      <div class="note">If research retrieval or the model fails, the deterministic Top 10 remains available and is explicitly marked as a fallback. Research may group eligible results but cannot change scores or restore a rejected ticker.</div>
-    </section>
 
-    <section id="ticker">
-      <div class="section-head"><div class="num">4</div><h2>Ticker options and research sequence</h2><p>The same ticker context supports deterministic option cards and evidence-grounded conversational research.</p></div>
-      <div class="diagram"><pre class="mermaid">
-sequenceDiagram
-  autonumber
-  participant User
-  participant UI as Screener / Chat
-  participant API
-  participant Graph as LangGraph workflow
-  participant Market as Market-data provider
-  participant Calc as Deterministic calculations
-  participant RAG as Evidence retrieval
-  participant Model
-  User->>UI: Enter ticker and question
-  UI->>API: POST /api/chat {symbol, question}
-  API->>Graph: Validated research request
-  Graph->>Market: Latest trade + bounded option chain
-  Market-->>Graph: Spot · quotes · IV · Greeks · timestamps
-  Graph->>Calc: Apply DTE · OTM · bid · spread · delta rules
-  Calc->>Calc: Rank by delta fit · spread quality · bid liquidity
-  Calc-->>Graph: Structured candidates + reason codes
-  opt Fundamental, catalyst, risk, or news evidence needed
-    Graph->>RAG: Retrieve ticker-filtered evidence
-    RAG-->>Graph: Reranked passages + citations
-  end
-  Graph->>Model: Instructions + profile + market state + evidence
-  Model-->>Graph: Structured grounded answer
-  Graph->>Graph: Validate numbers · citations · safety
-  Graph-->>API: Answer + UI candidates + warnings
-  API-->>UI: Update chat and ticker cards
-      </pre></div>
-    </section>
 
     <section id="rag">
       <div class="section-head"><div class="num">5</div><h2>Advanced RAG: ingestion and retrieval</h2><p>The evidence system covers company fundamentals, catalysts, risks, guidance, regulation, competition, and recent developments—not only SEC metadata.</p></div>

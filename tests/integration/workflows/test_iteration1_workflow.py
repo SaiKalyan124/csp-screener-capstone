@@ -73,3 +73,22 @@ def test_dashboard_excludes_stock_without_required_option_contracts():
     assert result["candidates"][0]["eligible_put_count"] == 5
     assert result["candidates"][0]["eligible_call_count"] == 5
     assert result["option_rejected_count"] == 1
+
+
+def test_dashboard_requires_csp_contracts_but_not_covered_calls():
+    class PutOnlyProvider(FakeProvider):
+        def option_chain(self, symbol, **kwargs):
+            return {
+                key: value for key, value in super().option_chain(symbol, **kwargs).items()
+                if "P" in key[-9:]
+            }
+
+    workflow = IterationOneWorkflow(
+        PutOnlyProvider(), IterationOneConfig(universe=("MU",))
+    )
+    result = workflow.screen({"available_capital": 5_000, "max_allocation_pct": 20})
+
+    assert result["qualified_count"] == 1
+    assert result["candidates"][0]["eligible_put_count"] == 5
+    assert result["candidates"][0]["eligible_call_count"] == 0
+    assert result["candidates"][0]["capital_fit"] == "exceeds_limit"
