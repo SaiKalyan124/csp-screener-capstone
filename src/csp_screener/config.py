@@ -24,6 +24,7 @@ class Settings:
     supabase_service_role_key: str | None = None
     supabase_anon_key: str | None = None
     auth_required: bool = False
+    allowed_emails: tuple[str, ...] = ()
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     refresh_seconds: int = 900
     host: str = "127.0.0.1"
@@ -42,6 +43,11 @@ def load_settings() -> Settings:
     secret = os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
     if not key or not secret:
         raise RuntimeError("Alpaca credentials are missing from the configured environment")
+    allowed_emails = tuple(
+        email.strip().lower()
+        for email in os.getenv("ALLOWED_EMAILS", "").split(",")
+        if email.strip()
+    )
     return Settings(
         alpaca_key=key,
         alpaca_secret=secret,
@@ -49,4 +55,5 @@ def load_settings() -> Settings:
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY") or None,
         supabase_anon_key=os.getenv("SUPABASE_ANON_KEY") or None,
         auth_required=os.getenv("AUTH_REQUIRED", "false").lower() in {"1", "true", "yes"},
+        allowed_emails=allowed_emails,
     )

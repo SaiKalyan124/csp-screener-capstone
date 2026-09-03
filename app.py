@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -51,6 +52,10 @@ def require_user(authorization: str | None = Header(default=None)) -> None:
         with urlopen(request, timeout=5) as response:
             if response.status != 200:
                 raise HTTPException(status_code=401, detail="Your session is invalid.")
+            user = json.loads(response.read() or b"{}")
+        email = str(user.get("email") or "").strip().lower()
+        if settings.allowed_emails and email not in settings.allowed_emails:
+            raise HTTPException(status_code=403, detail="This account is not approved for access.")
     except HTTPException:
         raise
     except Exception as exc:
