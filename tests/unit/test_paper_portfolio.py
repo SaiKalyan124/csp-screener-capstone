@@ -19,7 +19,7 @@ def test_portfolio_ui_uses_explicit_paper_option_actions() -> None:
 
     assert 'id="portfolio-view"' in html
     assert "No orders are submitted" in html
-    assert "SELL_TO_OPEN" in javascript
-    assert "BUY_TO_OPEN" in javascript
+    assert "SELL_TO_OPEN" in html and "SELL_TO_OPEN" in javascript
+    assert "BUY_TO_OPEN" in html
     assert "Buy to close" in javascript
     assert "Sell to close" in javascript
