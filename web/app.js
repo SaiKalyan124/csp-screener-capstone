@@ -13,6 +13,22 @@ const signOutButton = document.querySelector("#sign-out");
 let supabaseClient = null;
 let accessToken = null;
 
+function readableUserName(session) {
+  const user = session?.user;
+  const metadataName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+  const source = metadataName || user?.email?.split("@")[0] || "Demo User";
+  return source
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function updateUserName(session) {
+  const name = readableUserName(session);
+  const firstName = name.split(/\s+/)[0];
+  document.querySelectorAll("[data-user-name]").forEach((node) => { node.textContent = name; });
+  document.querySelectorAll("[data-user-first-name]").forEach((node) => { node.textContent = firstName; });
+}
+
 async function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -31,6 +47,7 @@ function showAuthenticated(session) {
   authGate.hidden = signedIn;
   document.querySelector(".app-shell").hidden = !signedIn;
   signOutButton.hidden = !signedIn;
+  updateUserName(session);
 }
 
 async function initializeAuth() {
@@ -70,7 +87,8 @@ const dashboardRun = document.querySelector("#dashboard-run");
 const dashboardEmpty = document.querySelector("#dashboard-empty");
 const dashboardResults = document.querySelector("#dashboard-results");
 let dashboardResearchStatus = "pending";
-let activeSymbol = input.value.trim().toUpperCase() || "MU";
+let activeSymbol = "";
+let firstDashboardSymbol = "";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const number = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -167,6 +185,7 @@ async function runStockScreen(force = false) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "The stock screen could not be completed.");
     dashboardResearchStatus = data.research_status || "not_requested";
+    firstDashboardSymbol = data.candidates[0]?.symbol || "";
     dashboardResults.replaceChildren(
       ...data.candidates.slice(0, 10).map(renderCandidate)
     );
@@ -257,7 +276,7 @@ screenerNav.addEventListener("click", (event) => {
   showView("screener");
 });
 
-showView(location.hash === "#dashboard" ? "dashboard" : "screener");
+showView(location.hash === "#screener" ? "screener" : "dashboard");
 initializeAuth();
 
 const chatForm = document.querySelector("#chat-form");
@@ -278,7 +297,14 @@ function tickerFromQuestion(question) {
 async function askCspAnalyst(questionText) {
   const question = questionText.trim();
   if (!question) return;
-  const symbol = tickerFromQuestion(question) || activeSymbol;
+  const symbol = tickerFromQuestion(question) || activeSymbol || firstDashboardSymbol;
+  if (!symbol) {
+    const message = document.createElement("p");
+    message.className = "assistant-message";
+    message.textContent = "Choose a dashboard candidate or enter a ticker before asking ticker-specific questions.";
+    chatMessages.append(message);
+    return;
+  }
   activeSymbol = symbol;
   input.value = symbol;
   const displayQuestion = question.replace(
