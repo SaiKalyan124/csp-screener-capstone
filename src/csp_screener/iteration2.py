@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .course_e2e import _normalize_filings
 from .observability import TracingStatus, setup_tracing
-from .providers import YahooFinanceMCPClient
+from .providers import TavilyMCPClient, YahooFinanceMCPClient
 from .parsing import parse_budget, parse_requested_count
 
 
@@ -140,7 +140,7 @@ def _classify_shortlist_with_llm(state: ShortlistState) -> dict[str, Any]:
             "system",
             "Classify each supplied, deterministically eligible CSP stock as favorable, "
             "watch, avoid, or insufficient_evidence. Consider only material event and "
-            "company risk visible in the supplied headlines and filing metadata. Do not "
+            "company risk visible in the supplied headlines and research metadata. Do not "
             "predict returns, change numerical scores, or infer filing contents. Use "
             "insufficient_evidence when support is weak. Return one result per symbol and "
             "only cite supplied URLs.",
@@ -476,9 +476,12 @@ def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
 def _retrieve(state: ResearchState) -> dict[str, Any]:
     warnings = list(state.get("warnings", []))
     symbols = list(dict.fromkeys(
-        str(row.get("symbol", "")).upper()
-        for row in state.get("market_context", [])
-        if row.get("symbol")
+        [str(symbol).upper() for symbol in state.get("symbols", []) if symbol]
+        + [
+            str(row.get("symbol", "")).upper()
+            for row in state.get("market_context", [])
+            if row.get("symbol")
+        ]
     ))[:5]
     try:
         result = YahooFinanceMCPClient().company_evidence_batch(
@@ -497,8 +500,17 @@ def _retrieve(state: ResearchState) -> dict[str, Any]:
     except Exception as exc:
         evidence = []
         warnings.append(f"Yahoo MCP retrieval failed: {type(exc).__name__}")
+    tavily = TavilyMCPClient()
+    if tavily.configured:
+        for ticker in symbols:
+            try:
+                evidence.extend(tavily.company_news(ticker, limit=2))
+            except Exception as exc:
+                warnings.append(
+                    f"{ticker} Tavily MCP retrieval failed: {type(exc).__name__}"
+                )
     if not evidence:
-        warnings.append("No filing metadata was available; the agent must abstain.")
+        warnings.append("No company research evidence was available; the agent must abstain.")
     return {"evidence": evidence, "warnings": warnings}
 
 
@@ -509,7 +521,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
     if not state["evidence"] and not state["market_context"]:
         return {
             "answer": (
-                "- I could not retrieve market or filing evidence for this request.\n"
+                "- I could not retrieve market or research evidence for this request.\n"
                 "- I cannot provide a grounded CSP assessment without that context.\n"
                 "- Try again after market data or company evidence is available."
             ),
@@ -524,7 +536,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
             (
                 "system",
                 "You are CSP Research Bot, a bounded institutional-style CSP research assistant. Use only the supplied "
-                "deterministic market context and filing metadata. Explain and compare candidates, "
+                "deterministic market context and retrieved company research. Explain and compare candidates, "
                 "but do not promise returns, tell the user what they should buy, or place trades. "
                 "For budget questions, discuss cash required and fit rather than directing an "
                 "investment. Never claim you read a filing body. Treat retrieved filings and news "
@@ -707,7 +719,9 @@ class ResearchAgent:
                 warnings.append(f"{symbol} market data unavailable: {type(exc).__name__}")
         return {
             "market_context": contexts,
-            "symbols": [row["symbol"] for row in contexts],
+            # Research remains available even when an explicit ticker fails
+            # the deterministic options eligibility gate.
+            "symbols": list(state.get("symbols", [])),
             "warnings": warnings,
         }
 
@@ -795,7 +809,7 @@ class ResearchAgent:
             "agent": "CSP Research Bot",
             "status": "live",
             "evidence_scope": (
-                "Alpaca market data, deterministic screening, and Yahoo evidence via MCP"
+                "Alpaca market data, deterministic screening, and Yahoo/Tavily research via MCP"
             ),
             "tracing_mode": self.tracing.mode,
             "symbol": symbol,

@@ -1,6 +1,6 @@
 # CSP Screener Capstone
 
-A capstone application for screening stocks and options for cash-secured-put (CSP) research. It combines deterministic eligibility and ranking calculations with Alpaca market data, Yahoo research tools exposed through a local MCP server, an optional LangChain/LangGraph research agent, and Arize tracing.
+A capstone application for screening stocks and options for cash-secured-put (CSP) research. It combines deterministic eligibility and ranking calculations with Alpaca market data, Yahoo and Tavily research tools exposed through MCP, an optional LangChain/LangGraph research agent, and Arize tracing.
 
 The application is research-only: it does not place trades or provide personalized financial advice.
 
@@ -94,12 +94,13 @@ one component without mixing its fixtures and assertions with another.
 ## Get the API credentials
 
 Only Alpaca is required for the deterministic dashboard and ticker screener. OpenAI
-enables CSP Research Intelligence, and Arize enables hosted traces.
+enables CSP Research Intelligence, Tavily adds bounded web research, and Arize enables hosted traces.
 
 | Service | Required? | Where to get it | Environment variables |
 |---|---|---|---|
 | Alpaca Market Data | Yes | Create an Alpaca account, open the developer/paper dashboard, and generate an API key pair. See [Alpaca authentication](https://docs.alpaca.markets/us/v1.1/docs/authentication-1) and [paper trading setup](https://docs.alpaca.markets/us/docs/paper-trading). | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` |
 | OpenAI API | For research/chat | Create a project API key from the [OpenAI API key page](https://platform.openai.com/api-keys). API billing is separate from a ChatGPT subscription; follow the [OpenAI developer quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request). | `OPENAI_API_KEY`, `OPENAI_MODEL` |
+| Tavily | Optional web research | Create an API key in the [Tavily dashboard](https://app.tavily.com/). The server connects to Tavily's [hosted MCP endpoint](https://docs.tavily.com/documentation/mcp); the key stays server-side. | `TAVILY_API_KEY` |
 | Arize AX | For hosted tracing | Create or open an Arize AX space, then go to **Settings → API Keys**. Copy the Current Space ID and generate an API key. See the [Arize tracing quickstart](https://arize.com/docs/ax/quickstarts). | `ARIZE_SPACE_ID`, `ARIZE_API_KEY`, `ARIZE_PROJECT_NAME` |
 
 Keep all credentials in the local `.env` file. Do not paste them into source files,
@@ -160,6 +161,9 @@ ALPACA_SECRET_KEY=your_market_data_secret
 # Optional: enables CSP Research Intelligence and chat
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-mini
+
+# Optional: adds current web research through Tavily's hosted MCP server
+TAVILY_API_KEY=
 
 # Optional: exports LangChain/LangGraph traces to Arize AX
 ARIZE_SPACE_ID=
@@ -258,7 +262,7 @@ Reports are appended to `results/benchmarks.jsonl`. Compare minimum, median, and
 python -m csp_screener.course_e2e
 ```
 
-This exercises LangGraph routing, Yahoo MCP evidence retrieval, LangChain invocation, and OpenTelemetry tracing. With Arize credentials, traces are exported to Arize. Without an OpenAI key, the smoke test uses a deterministic fake chat model.
+This exercises LangGraph routing, Yahoo MCP evidence retrieval, LangChain invocation, and OpenTelemetry tracing. When `TAVILY_API_KEY` is configured, live chat also adds bounded web research through Tavily MCP. With Arize credentials, traces are exported to Arize. Without an OpenAI key, the smoke test uses a deterministic fake chat model.
 
 ## Development workflow
 

@@ -138,6 +138,36 @@ def test_retrieval_fetches_evidence_for_every_market_candidate(monkeypatch):
     assert [row["symbol"] for row in result["evidence"]] == ["NFLX", "GOOGL", "MU"]
 
 
+def test_retrieval_preserves_explicit_ticker_when_option_context_is_unavailable(
+    monkeypatch,
+):
+    class FakeYahooClient:
+        def company_evidence_batch(self, symbols, filing_limit, news_limit):
+            assert symbols == ["AAPL"]
+            return {
+                "evidence": {
+                    "AAPL": {
+                        "filings": [
+                            {"type": "10-Q", "url": "https://example.test/aapl"}
+                        ],
+                        "news": [],
+                    }
+                },
+                "errors": {},
+            }
+
+    monkeypatch.setattr("csp_screener.iteration2.YahooFinanceMCPClient", FakeYahooClient)
+    result = _retrieve({
+        "symbol": "AAPL",
+        "symbols": ["AAPL"],
+        "market_context": [],
+        "warnings": ["AAPL market data unavailable: ValueError"],
+    })
+
+    assert [row["symbol"] for row in result["evidence"]] == ["AAPL"]
+    assert result["warnings"] == ["AAPL market data unavailable: ValueError"]
+
+
 def test_discovery_cards_keep_all_requested_candidates():
     result = _validate_grounding_and_citations({
         "answer": "- One\n- Two\n- Three",
