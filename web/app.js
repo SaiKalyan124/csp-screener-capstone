@@ -74,11 +74,17 @@ async function initializeAuth() {
     );
     const { data } = await supabaseClient.auth.getSession();
     showAuthenticated(data.session);
-    if (data.session) runStockScreen(false);
+    if (data.session) {
+      runStockScreen(false);
+      if (location.hash === "#portfolio") loadPortfolio(false);
+    }
     supabaseClient.auth.onAuthStateChange((_event, session) => {
       const wasSignedOut = !accessToken;
       showAuthenticated(session);
-      if (session && wasSignedOut) runStockScreen(false);
+      if (session && wasSignedOut) {
+        runStockScreen(false);
+        if (location.hash === "#portfolio") loadPortfolio(false);
+      }
     });
   } catch (error) {
     authStatus.textContent = "Authentication could not be initialized.";
