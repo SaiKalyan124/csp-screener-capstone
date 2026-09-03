@@ -8,9 +8,20 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import WEB_ROOT, load_settings
 from .services import ApplicationService
+from .profiles import normalize_profile
 
 
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+PROFILE_FIELDS = tuple(normalize_profile())
+
+
+def _profile_from_query(query: dict[str, list[str]]) -> dict[str, object]:
+    values = {
+        field: query[field][0]
+        for field in PROFILE_FIELDS
+        if field in query and query[field]
+    }
+    return normalize_profile(values)
 
 
 class DemoHandler(SimpleHTTPRequestHandler):
@@ -28,7 +39,9 @@ class DemoHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/screen":
                 force = query.get("refresh", ["0"])[0].lower() in {"1", "true", "yes"}
                 research = query.get("research", ["0"])[0].lower() in {"1", "true", "yes"}
-                self._send_json(self.service.screen(force=force, research=research))
+                self._send_json(self.service.screen(
+                    force=force, research=research, profile=_profile_from_query(query)
+                ))
                 return
             if parsed.path == "/api/runtime-config":
                 self._send_json({"auth_required": False})
@@ -38,19 +51,30 @@ class DemoHandler(SimpleHTTPRequestHandler):
                 if not SYMBOL_RE.fullmatch(symbol):
                     self._send_json({"error": "Enter a valid ticker symbol."}, HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json(self.service.options(symbol))
+                self._send_json(
+                    self.service.options(symbol, profile=_profile_from_query(query))
+                )
                 return
             super().do_GET()
         except Exception as exc:
             self._send_json({"error": str(exc)}, HTTPStatus.BAD_GATEWAY)
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-        if urlparse(self.path).path != "/api/chat":
+        path = urlparse(self.path).path
+        if path not in {"/api/chat", "/api/profile/recommend"}:
             self._send_json({"error": "Not found."}, HTTPStatus.NOT_FOUND)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
+            if path == "/api/profile/recommend":
+                current = normalize_profile(payload.get("current_profile"))
+                self._send_json(self.service.recommend_profile(
+                    str(payload.get("description", "")).strip(),
+                    float(payload.get("available_capital", 0) or 0),
+                    current,
+                ))
+                return
             symbol = str(payload.get("symbol", "")).strip().upper()
             question = str(payload.get("question", "")).strip()
             if not SYMBOL_RE.fullmatch(symbol):
@@ -59,7 +83,9 @@ class DemoHandler(SimpleHTTPRequestHandler):
             if not question:
                 self._send_json({"error": "Question is required."}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json(self.service.research(symbol, question))
+            self._send_json(self.service.research(
+                symbol, question, profile=normalize_profile(payload.get("profile"))
+            ))
         except (ValueError, json.JSONDecodeError):
             self._send_json({"error": "Invalid JSON request."}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:

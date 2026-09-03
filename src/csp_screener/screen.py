@@ -221,6 +221,8 @@ def select_csp_and_covered_calls(
     min_abs_delta: float = 0.15,
     max_abs_delta: float = 0.40,
     target_abs_delta: float = 0.25,
+    max_put_collateral: float | None = None,
+    require_calls: bool = True,
 ) -> tuple[date, list[dict[str, Any]]]:
     """Return the highest-ranked eligible CSPs and covered calls.
 
@@ -282,14 +284,18 @@ def select_csp_and_covered_calls(
 
     for expiry in sorted(grouped):
         puts = sorted(
-            (row for row in grouped[expiry]["P"] if row["strike"] < spot),
+            (
+                row for row in grouped[expiry]["P"]
+                if row["strike"] < spot
+                and (max_put_collateral is None or row["strike"] * 100 <= max_put_collateral)
+            ),
             key=lambda row: (-row["rank_score"], -row["premium_yield_pct"], row["strike"]),
         )[:count]
         calls = sorted(
             (row for row in grouped[expiry]["C"] if row["strike"] > spot),
             key=lambda row: (-row["rank_score"], -row["premium_yield_pct"], -row["strike"]),
         )[:count]
-        if len(puts) == count and len(calls) == count:
+        if len(puts) == count and (len(calls) == count or not require_calls):
             for row in puts:
                 row["strategy"] = "Cash-secured put"
                 row["moneyness"] = "OTM"
@@ -297,7 +303,25 @@ def select_csp_and_covered_calls(
                 row["strategy"] = "Covered call"
                 row["moneyness"] = "OTM"
             return expiry, puts + calls
+    eligible_otm_put_collateral = [
+        float(row["strike"]) * 100
+        for bucket in grouped.values()
+        for row in bucket["P"]
+        if float(row["strike"]) < spot
+    ]
+    capital_rule = ""
+    if max_put_collateral is not None:
+        minimum = min(eligible_otm_put_collateral, default=None)
+        if minimum is not None and minimum > max_put_collateral:
+            capital_rule = (
+                f"; the lowest otherwise-eligible CSP requires ${minimum:,.0f}, "
+                f"above the ${max_put_collateral:,.0f} profile position limit"
+            )
+        else:
+            capital_rule = f", including a ${max_put_collateral:,.0f} profile position limit"
     raise ValueError(
-        "No expiration has five eligible OTM puts and calls within the configured "
-        "delta, bid, and spread rules"
+        "No expiration has five eligible OTM puts"
+        + (" and calls" if require_calls else "")
+        + " within the configured "
+        f"delta, bid, and spread rules{capital_rule}"
     )

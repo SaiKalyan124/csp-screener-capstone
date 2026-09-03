@@ -39,8 +39,13 @@ def load_settings() -> Settings:
         shared = Path(shared_env).expanduser()
         if shared.exists():
             load_dotenv(shared, override=False)
-    key = os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID")
-    secret = os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
+    def clean_env(name: str) -> str | None:
+        value = os.getenv(name)
+        cleaned = value.strip() if value else ""
+        return cleaned or None
+
+    key = clean_env("ALPACA_API_KEY") or clean_env("APCA_API_KEY_ID")
+    secret = clean_env("ALPACA_SECRET_KEY") or clean_env("APCA_API_SECRET_KEY")
     if not key or not secret:
         raise RuntimeError("Alpaca credentials are missing from the configured environment")
     allowed_emails = tuple(
@@ -51,9 +56,9 @@ def load_settings() -> Settings:
     return Settings(
         alpaca_key=key,
         alpaca_secret=secret,
-        supabase_url=os.getenv("SUPABASE_URL") or None,
-        supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY") or None,
-        supabase_anon_key=os.getenv("SUPABASE_ANON_KEY") or None,
-        auth_required=os.getenv("AUTH_REQUIRED", "false").lower() in {"1", "true", "yes"},
+        supabase_url=clean_env("SUPABASE_URL"),
+        supabase_service_role_key=clean_env("SUPABASE_SERVICE_ROLE_KEY"),
+        supabase_anon_key=clean_env("SUPABASE_ANON_KEY"),
+        auth_required=(clean_env("AUTH_REQUIRED") or "false").lower() in {"1", "true", "yes"},
         allowed_emails=allowed_emails,
     )

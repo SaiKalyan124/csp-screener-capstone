@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
+from time import perf_counter
 from typing import Annotated, Any, Callable, TypedDict
 
 from pydantic import BaseModel, Field
@@ -11,6 +12,7 @@ from .course_e2e import _normalize_filings
 from .observability import TracingStatus, setup_tracing
 from .providers import YahooFinanceMCPClient
 from .parsing import parse_budget, parse_requested_count
+from .tool_routing import route_research_tools
 
 
 class ResearchState(TypedDict, total=False):
@@ -39,6 +41,9 @@ class ResearchState(TypedDict, total=False):
     research_dossier: dict[str, Any]
     risk_decision: dict[str, Any]
     audit_record: dict[str, Any]
+    profile: dict[str, Any]
+    tool_route: dict[str, Any]
+    latency_breakdown_ms: dict[str, float]
 
 
 class ShortlistState(TypedDict, total=False):
@@ -56,7 +61,6 @@ def _prepare_eligible_shortlist(state: ShortlistState) -> dict[str, Any]:
         row for row in state.get("candidates", [])
         if row.get("option_eligible") is True
         and row.get("eligible_put_count", 0) >= 5
-        and row.get("eligible_call_count", 0) >= 5
     ][:10]
     return {"candidates": eligible, "warnings": list(state.get("warnings", []))}
 
@@ -215,7 +219,6 @@ def _validate_shortlist_classification(state: ShortlistState) -> dict[str, Any]:
         "contract_eligibility_integrity": 1.0 if all(
             row.get("option_eligible") is True
             and row.get("eligible_put_count", 0) >= 5
-            and row.get("eligible_call_count", 0) >= 5
             for row in enriched
         ) else 0.0,
     }
@@ -258,8 +261,16 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
         raise ValueError("Ask a research question between 1 and 600 characters.")
     discovery = ResearchAgent._needs_discovery(question)
     symbols = [] if discovery else ResearchAgent._symbols(symbol, question)
-    budget = parse_budget(question)
+    profile = state.get("profile", {})
+    explicit_budget = parse_budget(question)
+    available_capital = float(profile.get("available_capital", 0) or 0)
+    allocation_pct = float(profile.get("max_allocation_pct", 100) or 100)
+    profile_position_limit = (
+        available_capital * allocation_pct / 100 if available_capital else None
+    )
+    budget = explicit_budget or profile_position_limit
     requested_count = parse_requested_count(question)
+    tool_route = route_research_tools(question)
     return {
         "symbol": symbol,
         "question": question,
@@ -268,14 +279,25 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
         "intent": "candidate_discovery" if discovery else "ticker_research",
         "budget": budget,
         "requested_count": requested_count,
+        "tool_route": {
+            "intent": tool_route.intent,
+            "primary": list(tool_route.primary),
+            "fallback": list(tool_route.fallback),
+            "reason": tool_route.reason,
+        },
         "mandate": {
             "budget": budget,
             "requested_count": requested_count,
             "strategy": "cash_secured_put",
             "risk_tolerance": next(
                 (risk for risk in ("low", "medium", "high") if f"{risk} risk" in question.lower()),
-                "unspecified",
+                str(profile.get("risk_level") or "unspecified"),
             ),
+            "profile_position_limit": profile_position_limit,
+            "profile_mode": profile.get("mode"),
+            "dte_range": [profile.get("dte_min"), profile.get("dte_max")],
+            "delta_range": [profile.get("delta_min"), profile.get("delta_max")],
+            "avoid_earnings_preference": profile.get("avoid_earnings"),
             "willing_to_own_underlying": "unknown",
             "decision_scope": "research_only",
         },
@@ -418,6 +440,8 @@ def _record_decision_and_evals(state: ResearchState) -> dict[str, Any]:
         "citation_precision": round(sum(row.get("url") in allowed for row in citations) / len(citations), 3) if citations else 1.0,
         "format_compliance": 1 <= len(state.get("answer", "").splitlines()) <= 10,
         "ranking_authority": "deterministic",
+        "tool_route": state.get("tool_route", {}),
+        "latency_breakdown_ms": state.get("latency_breakdown_ms", {}),
     }}
 
 
@@ -457,6 +481,10 @@ def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
     for ticker in display[:5]:
         context = contexts[ticker]
         puts = [row for row in context.get("contracts", []) if row.get("strategy") == "Cash-secured put"]
+        if context.get("spot") is None or not puts:
+            # Exclusions belong in the grounded explanation, never in an
+            # actionable market card with a fabricated zero price.
+            continue
         best_put = min(puts, key=lambda row: abs(abs(float(row.get("delta") or 0)) - 0.25), default=None)
         expiration = context.get("expiration")
         cards.append({
@@ -474,6 +502,7 @@ def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
 
 
 def _retrieve(state: ResearchState) -> dict[str, Any]:
+    started = perf_counter()
     warnings = list(state.get("warnings", []))
     symbols = list(dict.fromkeys(
         str(row.get("symbol", "")).upper()
@@ -499,7 +528,9 @@ def _retrieve(state: ResearchState) -> dict[str, Any]:
         warnings.append(f"Yahoo MCP retrieval failed: {type(exc).__name__}")
     if not evidence:
         warnings.append("No filing metadata was available; the agent must abstain.")
-    return {"evidence": evidence, "warnings": warnings}
+    latency = dict(state.get("latency_breakdown_ms", {}))
+    latency["yahoo_mcp_retrieval"] = round((perf_counter() - started) * 1000, 2)
+    return {"evidence": evidence, "warnings": warnings, "latency_breakdown_ms": latency}
 
 
 def _answer(state: ResearchState) -> dict[str, Any]:
@@ -560,6 +591,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
     model = ChatOpenAI(
         model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), temperature=0
     ).with_structured_output(ResearchAnswer)
+    started = perf_counter()
     result = (prompt | model).invoke(
         {
             "symbol": "not applicable (discovery request)"
@@ -614,6 +646,8 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         }
         for url in cited
     ]
+    latency = dict(state.get("latency_breakdown_ms", {}))
+    latency["openai_structured_answer"] = round((perf_counter() - started) * 1000, 2)
     return {
         "answer": "\n".join(f"- {point.strip()}" for point in bullet_points[:10]),
         "risk_level": result.risk_level.lower()
@@ -622,6 +656,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         "citations": citations,
         "selected_symbol": result.selected_symbol,
         "display_symbols": result.display_symbols,
+        "latency_breakdown_ms": latency,
     }
 
 
@@ -669,8 +704,8 @@ def build_research_graph(load_explicit_market, discover_market):
 class ResearchAgent:
     def __init__(
         self,
-        market_context_loader: Callable[[str], dict[str, Any]],
-        discovery_loader: Callable[[str], list[dict[str, Any]]],
+        market_context_loader: Callable[[str, dict[str, Any] | None], dict[str, Any]],
+        discovery_loader: Callable[[str, dict[str, Any] | None], list[dict[str, Any]]],
     ) -> None:
         if not os.getenv("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY is required for the Iteration 2 agent")
@@ -698,30 +733,38 @@ class ResearchAgent:
         return result["output"]
 
     def _load_explicit_market(self, state: ResearchState) -> dict[str, Any]:
+        started = perf_counter()
         contexts: list[dict[str, Any]] = []
         warnings = list(state.get("warnings", []))
         for symbol in state.get("symbols", [])[:5]:
             try:
-                contexts.append(self.market_context_loader(symbol))
+                contexts.append(self.market_context_loader(symbol, state.get("profile")))
             except Exception as exc:
                 warnings.append(f"{symbol} market data unavailable: {type(exc).__name__}")
+        latency = dict(state.get("latency_breakdown_ms", {}))
+        latency["alpaca_explicit_market_data"] = round((perf_counter() - started) * 1000, 2)
         return {
             "market_context": contexts,
             "symbols": [row["symbol"] for row in contexts],
             "warnings": warnings,
+            "latency_breakdown_ms": latency,
         }
 
     def _discover_market(self, state: ResearchState) -> dict[str, Any]:
+        started = perf_counter()
         warnings = list(state.get("warnings", []))
         try:
-            contexts = self.discovery_loader(state["question"])
+            contexts = self.discovery_loader(state["question"], state.get("profile"))
         except Exception as exc:
             contexts = []
             warnings.append(f"Candidate discovery failed: {type(exc).__name__}")
+        latency = dict(state.get("latency_breakdown_ms", {}))
+        latency["alpaca_candidate_discovery"] = round((perf_counter() - started) * 1000, 2)
         return {
             "market_context": contexts,
             "symbols": [row["symbol"] for row in contexts],
             "warnings": warnings,
+            "latency_breakdown_ms": latency,
         }
 
     @staticmethod
@@ -758,13 +801,17 @@ class ResearchAgent:
         ]
         return not meaningful and any(trigger in lowered for trigger in triggers)
 
-    def ask(self, symbol: str, question: str) -> dict[str, Any]:
+    def ask(
+        self, symbol: str, question: str,
+        profile: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         symbol = symbol.strip().upper()
         question = question.strip()
         if not re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", symbol):
             raise ValueError("Enter a valid ticker.")
         if not question or len(question) > 600:
             raise ValueError("Ask a research question between 1 and 600 characters.")
+        started = perf_counter()
         result = self.graph.invoke(
             {
                 "symbol": symbol,
@@ -775,6 +822,7 @@ class ResearchAgent:
                 "risk_level": "unknown",
                 "citations": [],
                 "warnings": [],
+                "profile": profile or {},
             }
         )
         symbols = result.get("symbols", [])
@@ -790,6 +838,8 @@ class ResearchAgent:
             )
         if result.get("display_symbols"):
             selected = result["display_symbols"][0]
+        latency = dict(result.get("latency_breakdown_ms", {}))
+        latency["total_research_flow"] = round((perf_counter() - started) * 1000, 2)
         return {
             "iteration": 2,
             "agent": "CSP Research Bot",
@@ -806,6 +856,7 @@ class ResearchAgent:
             "market_symbols": symbols,
             "risk_decision": result.get("risk_decision", {}),
             "audit_record": result.get("audit_record", {}),
+            "latency_breakdown_ms": latency,
             "ui_action": (
                 {"type": "load_options", "symbol": selected} if selected else None
             ),

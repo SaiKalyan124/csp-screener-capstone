@@ -1,0 +1,21 @@
+[
+  {"question":"Show AAPL puts with delta above 0.20 and more than 20 DTE","intent":"market_and_options","primary":["alpaca_market_mcp"]},
+  {"question":"When is MU's next earnings date?","intent":"company_disclosure","primary":["yahoo_finance_mcp"]},
+  {"question":"What recent AI regulation could affect NVDA?","intent":"current_web_research","primary":["alpaca_news_mcp","tavily_search_mcp"]},
+  {"question":"What should I research before accepting assignment on GOOGL?","intent":"company_research","primary":["yahoo_finance_mcp"]},
+  {"question":"Compare bid ask spreads for AMD and INTC puts","intent":"market_and_options","primary":["alpaca_market_mcp"]},
+  {"question":"Summarize the latest 10-Q metadata for MSFT","intent":"company_disclosure","primary":["yahoo_finance_mcp"]},
+  {"question":"Find five CSP candidates for a $40,000 account","intent":"market_and_options","primary":["alpaca_market_mcp"]},
+  {"question":"Show the current quote and volatility for TSLA","intent":"market_and_options","primary":["alpaca_market_mcp"]},
+  {"question":"What does the latest 8-K metadata say for AMZN?","intent":"company_disclosure","primary":["yahoo_finance_mcp"]},
+  {"question":"What competitors recently announced new AI chips?","intent":"current_web_research","primary":["alpaca_news_mcp","tavily_search_mcp"]},
+  {"question":"Are there recent lawsuits involving META?","intent":"current_web_research","primary":["alpaca_news_mcp","tavily_search_mcp"]},
+  {"question":"Explain the company risks I should research for COST","intent":"company_research","primary":["yahoo_finance_mcp"]},
+  {"question":"Configure my risk appetite based on lower assignment tolerance","intent":"profile_advice","primary":[]},
+  {"question":"Why did my profile choose 30 DTE?","intent":"profile_advice","primary":[]},
+  {"question":"Show option premium and strike choices for NFLX","intent":"market_and_options","primary":["alpaca_market_mcp"]},
+  {"question":"Find stocks with good cash-secured puts","intent":"market_and_options","primary":["alpaca_market_mcp"]},
+  {"question":"What happened in the semiconductor sector today?","intent":"current_web_research","primary":["alpaca_news_mcp","tavily_search_mcp"]},
+  {"question":"Review GOOGL before I accept assignment","intent":"company_research","primary":["yahoo_finance_mcp"]},
+  {"question":"Using my saved profile, assess whether an AAPL CSP fits my limits.","intent":"market_and_options","primary":["alpaca_market_mcp"]}
+]

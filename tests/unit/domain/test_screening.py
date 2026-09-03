@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from csp_screener.screen import (
     parse_occ_symbol,
     rank_stock_candidates,
@@ -107,3 +109,21 @@ def test_contract_selection_filters_delta_and_ranks_quote_quality():
     assert len(rows) == 10
     assert all(0.15 <= abs(row["delta"]) <= 0.40 for row in rows)
     assert all(row["strike"] != 99.0 for row in rows)
+
+
+def test_contract_selection_explains_profile_collateral_rejection():
+    chain = {}
+    for contract_type in ("P", "C"):
+        strikes = range(88, 100, 2) if contract_type == "P" else range(102, 114, 2)
+        for strike in strikes:
+            symbol = f"XYZ260918{contract_type}{strike * 1000:08d}"
+            chain[symbol] = snapshot(
+                1.0, 1.08, delta=-0.25 if contract_type == "P" else 0.25
+            )
+
+    with pytest.raises(ValueError) as exc_info:
+        select_csp_and_covered_calls(chain, 100.0, max_put_collateral=5_000)
+
+    message = str(exc_info.value)
+    assert "lowest otherwise-eligible CSP requires $8,800" in message
+    assert "$5,000 profile position limit" in message

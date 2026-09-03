@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..config import Settings
@@ -8,6 +9,7 @@ from ..agents import ResearchAgent
 from ..providers import AlpacaMarketDataProvider, SupabaseStateStore, YahooFinanceMCPClient
 from ..workflows import IterationOneConfig, IterationOneWorkflow
 from ..parsing import parse_budget, parse_requested_count
+from ..profile_advisor import ProfileAdvisor
 
 
 class ApplicationService:
@@ -41,22 +43,51 @@ class ApplicationService:
             # Deterministic screening remains usable when the optional model is
             # not configured. API responses expose the research fallback.
             self.agent = None
+        try:
+            self.profile_advisor: ProfileAdvisor | None = ProfileAdvisor()
+        except RuntimeError:
+            self.profile_advisor = None
 
-    def options(self, symbol: str) -> dict[str, object]:
-        result = self.workflow.options(symbol)
+    def recommend_profile(
+        self, description: str, available_capital: float,
+        current_profile: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        if self.profile_advisor is None:
+            raise RuntimeError(
+                "Profile Advisor is unavailable; configure OPENAI_API_KEY to enable it."
+            )
+        return self.profile_advisor.recommend(
+            description, available_capital, current_profile
+        )
+
+    def options(
+        self, symbol: str, *, profile: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        result = self.workflow.options(symbol, profile)
+        earnings_started = time.perf_counter()
         try:
             calendar = YahooFinanceMCPClient().next_earnings_date(symbol)
-            return {**result, "next_earnings": calendar.get("next_earnings")}
+            earnings = calendar.get("next_earnings")
         except Exception:
-            return {**result, "next_earnings": None}
+            earnings = None
+        latency = dict(result.get("latency_breakdown_ms", {}))
+        latency["yahoo_mcp_earnings"] = round(
+            (time.perf_counter() - earnings_started) * 1000
+        )
+        return {**result, "next_earnings": earnings, "latency_breakdown_ms": latency}
 
-    def screen(self, *, force: bool = False, research: bool = False) -> dict[str, object]:
+    def screen(
+        self, *, force: bool = False, research: bool = False,
+        profile: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         with self._cache_lock:
-            cached = self._research_screen_cache if research else self._screen_cache
+            cached = None if profile else (
+                self._research_screen_cache if research else self._screen_cache
+            )
             if cached is not None and not force:
                 return {**cached, "cache_status": "hit"}
 
-        if self.state_store is not None and not force:
+        if self.state_store is not None and not force and not profile:
             try:
                 persisted = self.state_store.latest_screen(research)
                 if persisted is not None:
@@ -72,10 +103,12 @@ class ApplicationService:
         # Cache hits never wait for a network refresh. Refresh misses are coalesced.
         with self._refresh_lock:
             with self._cache_lock:
-                cached = self._research_screen_cache if research else self._screen_cache
+                cached = None if profile else (
+                    self._research_screen_cache if research else self._screen_cache
+                )
                 if cached is not None and not force:
                     return {**cached, "cache_status": "hit"}
-            result = self.workflow.screen()
+            result = self.workflow.screen(profile)
             if research:
                 try:
                     if self.agent is None:
@@ -91,23 +124,25 @@ class ApplicationService:
                         ],
                     }
             with self._cache_lock:
-                if research:
+                if not profile and research:
                     self._research_screen_cache = result
-                else:
+                elif not profile:
                     self._screen_cache = result
-            if self.state_store is not None:
+            if self.state_store is not None and not profile:
                 try:
                     self.state_store.save_screen(result, research)
                 except Exception as exc:
                     print(f"[demo] Supabase cache write failed: {type(exc).__name__}")
             return {**result, "cache_status": "refreshed"}
 
-    def research(self, symbol: str, question: str) -> dict[str, object]:
+    def research(
+        self, symbol: str, question: str, *, profile: dict[str, object] | None = None
+    ) -> dict[str, object]:
         if self.agent is None:
             raise RuntimeError(
                 "Research agent is unavailable; configure OPENAI_API_KEY to enable it."
             )
-        response = self.agent.ask(symbol, question)
+        response = self.agent.ask(symbol, question, profile=profile)
         if self.state_store is not None:
             try:
                 self.state_store.save_research(symbol, question, response)
@@ -131,11 +166,32 @@ class ApplicationService:
     def stop_background_refresh(self) -> None:
         self._stop_refresh.set()
 
-    def agent_market_context(self, symbol: str) -> dict[str, object]:
-        options = self.workflow.options(symbol)
+    def agent_market_context(
+        self, symbol: str, profile: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        try:
+            options = self.workflow.options(
+                symbol,
+                profile,
+                enforce_capital=False,
+                require_calls=False,
+            )
+        except ValueError as exc:
+            # Keep deterministic rejection evidence available to the research graph.
+            return {
+                "symbol": symbol,
+                "spot": None,
+                "expiration": None,
+                "stock_ranking": None,
+                "contracts": [],
+                "eligibility": "excluded",
+                "rejection_reason": str(exc),
+                "source": "Alpaca market data plus deterministic profile rules",
+                "profile": profile or {},
+            }
         ranking = next(
             (
-                row for row in self.screen().get("candidates", [])
+                row for row in self.screen(profile=profile).get("candidates", [])
                 if row.get("symbol") == symbol
             ),
             None,
@@ -171,12 +227,22 @@ class ApplicationService:
             "expiration": options["expiration"],
             "stock_ranking": ranking,
             "contracts": contracts,
+            "eligibility": "eligible",
+            "rejection_reason": None,
             "source": "Alpaca market data plus deterministic calculations",
+            "profile": profile or {},
         }
 
-    def discover_agent_candidates(self, question: str) -> list[dict[str, object]]:
-        budget = parse_budget(question)
-        candidates = list(self.screen().get("candidates", []))
+    def discover_agent_candidates(
+        self, question: str, profile: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        explicit_budget = parse_budget(question)
+        profile_budget = float(profile.get("available_capital", 0)) if profile else None
+        allocation = float(profile.get("max_allocation_pct", 100)) if profile else 100
+        budget = explicit_budget or (
+            profile_budget * allocation / 100 if profile_budget else None
+        )
+        candidates = list(self.screen(profile=profile).get("candidates", []))
         requested_count = parse_requested_count(question)
         # Load a wider deterministic pool first. CSP affordability depends on the
         # eligible put strike, not on buying 100 shares at the current stock price.
@@ -184,7 +250,7 @@ class ApplicationService:
         contexts: list[dict[str, object]] = []
         with ThreadPoolExecutor(max_workers=min(5, len(shortlist) or 1)) as pool:
             futures = {
-                pool.submit(self.agent_market_context, symbol): symbol
+                pool.submit(self.agent_market_context, symbol, profile): symbol
                 for symbol in shortlist
             }
             for future in as_completed(futures):
