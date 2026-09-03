@@ -23,6 +23,15 @@ function text(value, fallback = "—") {
   return value === null || value === undefined ? fallback : value;
 }
 
+function relativeAge(timestamp) {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(timestamp).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} seconds ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+}
+
 function readableContract(row) {
   const match = row.symbol.match(/^(.*?)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
   if (!match) return row.symbol;
@@ -131,16 +140,37 @@ async function loadChain(symbol) {
     activeSymbol = data.symbol;
     input.value = data.symbol;
     document.querySelector("#context-symbol").textContent = data.symbol;
-    document.querySelector("#context-price").textContent = `${money.format(data.spot)} latest trade`;
-    document.querySelector("#context-expiry").textContent = new Date(`${data.expiration}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    document.querySelector("#context-count").textContent = `${data.contracts.length} contracts`;
-    document.querySelector("#context-latency").textContent = `${data.latency_ms} ms`;
-    document.querySelector("#context-scanned").textContent = `${data.source_count} contracts scanned`;
+    document.querySelector("#context-price").textContent = money.format(data.spot);
+    const bestPut = data.contracts.find((row) => row.strategy === "Cash-secured put");
+    const collateral = bestPut ? bestPut.strike * 100 : null;
+    document.querySelector("#context-collateral").textContent = collateral ? money.format(collateral) : "—";
+    document.querySelector("#context-freshness").textContent = relativeAge(data.trade_timestamp);
+    const earnings = data.next_earnings ? new Date(data.next_earnings) : null;
+    const expiry = new Date(`${data.expiration}T23:59:59`);
+    document.querySelector("#context-earnings").textContent = earnings
+      ? `${earnings <= expiry ? "Before" : "After"} expiration`
+      : "Not available";
+    document.querySelector("#context-earnings-detail").textContent = earnings
+      ? earnings.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : "Yahoo MCP calendar unavailable";
+    document.querySelector("#operational-detail").textContent = `Alpaca response: ${data.latency_ms} ms · ${data.source_count} contracts scanned · Expiration ${new Date(`${data.expiration}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
     body.replaceChildren(...data.contracts.map(renderRow));
     empty.hidden = true;
     tableWrap.hidden = false;
   } catch (error) {
-    status.textContent = error.message;
+    const isEligibilityRejection = error.message.includes("No expiration has five eligible");
+    status.textContent = isEligibilityRejection
+      ? `${symbol} does not meet the screener’s current eligibility criteria. No expiration has at least five quoted OTM puts and five quoted OTM calls after the delta, bid, and spread filters. This is a current-data result and may change as prices and liquidity update.`
+      : error.message;
+    if (isEligibilityRejection) {
+      document.querySelector("#context-symbol").textContent = symbol;
+      document.querySelector("#context-price").textContent = "Not eligible";
+      document.querySelector("#context-collateral").textContent = "—";
+      document.querySelector("#context-freshness").textContent = "Screened live";
+      document.querySelector("#context-earnings").textContent = "Not evaluated";
+      document.querySelector("#context-earnings-detail").textContent = "Ticker did not pass contract rules";
+      document.querySelector("#operational-detail").textContent = "Try again as prices, quotes, and liquidity change.";
+    }
     tableWrap.hidden = true;
     empty.hidden = false;
   } finally {
@@ -189,7 +219,7 @@ function tickerFromQuestion(question) {
     .find((candidate) => !ignored.has(candidate) && /^[A-Z][A-Z.\-]{0,9}$/.test(candidate));
 }
 
-async function askKezzy(questionText) {
+async function askCspAnalyst(questionText) {
   const question = questionText.trim();
   if (!question) return;
   const symbol = tickerFromQuestion(question) || activeSymbol;
@@ -201,7 +231,7 @@ async function askKezzy(questionText) {
   ).trim() || question;
   const userMessage = document.createElement("p");
   userMessage.className = "user-message";
-  userMessage.textContent = `${symbol}: ${displayQuestion}`;
+  userMessage.textContent = displayQuestion;
   const answerMessage = document.createElement("div");
   answerMessage.className = "assistant-message agent-response";
   answerMessage.textContent = "Researching Yahoo evidence via MCP…";
@@ -215,7 +245,7 @@ async function askKezzy(questionText) {
       body: JSON.stringify({ symbol, question }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Kezzy could not answer.");
+    if (!response.ok) throw new Error(data.error || "CSP Research Bot could not answer.");
     answerMessage.textContent = "";
     const bulletList = document.createElement("ul");
     bulletList.className = "chat-bullets";
@@ -223,26 +253,15 @@ async function askKezzy(questionText) {
       .split(/\r?\n/)
       .map((line) => line.replace(/^\s*[-•]\s*/, "").trim())
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, 10)
       .forEach((text) => {
         const bullet = document.createElement("li");
         bullet.textContent = text;
         bulletList.append(bullet);
       });
     answerMessage.append(bulletList);
-    if (data.citations.length) {
-      const citations = document.createElement("span");
-      citations.className = "chat-citations";
-      data.citations.forEach((citation) => {
-        const link = document.createElement("a");
-        link.href = citation.url;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = citation.label;
-        citations.append(link);
-      });
-      answerMessage.append(citations);
-    }
+    // Evidence URLs remain in the backend response and Arize trace for audit and
+    // debugging; the user-facing chat shows only concise material findings.
     if (data.ui_candidates?.length) {
       const cards = document.createElement("span");
       cards.className = "chat-candidate-cards";
@@ -281,14 +300,14 @@ async function askKezzy(questionText) {
 }
 
 document.querySelectorAll(".chat-hints button[data-question]").forEach((promptButton) => {
-  promptButton.addEventListener("click", () => askKezzy(promptButton.dataset.question));
+  promptButton.addEventListener("click", () => askCspAnalyst(promptButton.dataset.question));
 });
 
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const question = chatQuestion.value;
   chatQuestion.value = "";
-  askKezzy(question);
+  askCspAnalyst(question);
 });
 
 const appShell = document.querySelector(".app-shell");

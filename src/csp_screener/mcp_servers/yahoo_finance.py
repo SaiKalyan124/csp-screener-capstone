@@ -8,6 +8,24 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("csp-yahoo-research")
 
 
+def _next_earnings_date(symbol: str) -> dict[str, Any]:
+    """Return Yahoo's next scheduled earnings date when one is available."""
+    import yfinance as yf
+
+    ticker_symbol = symbol.strip().upper()
+    calendar = yf.Ticker(ticker_symbol).calendar or {}
+    value = calendar.get("Earnings Date") if isinstance(calendar, dict) else None
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    return {
+        "symbol": ticker_symbol,
+        "next_earnings": value.isoformat() if hasattr(value, "isoformat") else None,
+        "source": "Yahoo Finance via local MCP",
+    }
+
+
 def _company_evidence(
     symbol: str,
     filing_limit: int = 5,
@@ -95,6 +113,12 @@ def get_company_evidence_batch(
             except Exception as exc:
                 errors[symbol] = type(exc).__name__
     return {"evidence": evidence, "errors": errors}
+
+
+@mcp.tool()
+def get_next_earnings_date(symbol: str) -> dict[str, Any]:
+    """Return the next scheduled earnings date for a ticker."""
+    return _next_earnings_date(symbol)
 
 
 def main() -> None:

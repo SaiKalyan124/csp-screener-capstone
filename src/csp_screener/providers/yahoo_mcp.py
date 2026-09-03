@@ -55,3 +55,6 @@ class YahooFinanceMCPClient:
             "filing_limit": filing_limit,
             "news_limit": news_limit,
         })
+
+    def next_earnings_date(self, symbol: str) -> dict[str, Any]:
+        return self._call("get_next_earnings_date", {"symbol": symbol})

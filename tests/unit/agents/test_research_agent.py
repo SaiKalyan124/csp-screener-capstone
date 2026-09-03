@@ -6,7 +6,9 @@ from csp_screener.iteration2 import (
     _answer,
     _parse_question_and_profile,
     _prepare_eligible_shortlist,
+    _retrieve,
     _route_research_intent,
+    _validate_grounding_and_citations,
     _validate_shortlist_classification,
 )
 
@@ -45,10 +47,18 @@ def test_answer_abstains_without_evidence_or_model_call():
     assert all(line.startswith("- ") for line in result["answer"].splitlines())
 
 
-def test_research_answer_requires_exactly_three_concise_bullets():
+def test_research_answer_allows_up_to_ten_concise_bullets():
+    result = ResearchAnswer(
+        bullet_points=[f"Candidate {index}" for index in range(1, 11)],
+        risk_level="unknown",
+        cited_urls=[],
+        selected_symbol=None,
+        display_symbols=[],
+    )
+    assert len(result.bullet_points) == 10
     with pytest.raises(ValueError):
         ResearchAnswer(
-            bullet_points=["Only one bullet"],
+            bullet_points=[f"Candidate {index}" for index in range(11)],
             risk_level="unknown",
             cited_urls=[],
             selected_symbol=None,
@@ -74,6 +84,12 @@ def test_agent_detects_top_three_capital_wording_as_discovery():
     )
 
 
+def test_agent_detects_five_stock_request_without_treating_i_as_a_ticker():
+    question = "What 5 stocks should I buy now"
+    assert ResearchAgent._needs_discovery(question)
+    assert ResearchAgent._symbols("MU", question) == ["MU"]
+
+
 def test_graph_parser_routes_explicit_ticker_research():
     state = _parse_question_and_profile({
         "symbol": "mu",
@@ -91,7 +107,51 @@ def test_graph_parser_routes_discovery_and_extracts_budget():
     })
     assert state["symbols"] == []
     assert state["budget"] == 50000
+    assert state["requested_count"] == 3
     assert _route_research_intent(state) == "deterministic_universe_screen"
+
+
+def test_retrieval_fetches_evidence_for_every_market_candidate(monkeypatch):
+    class FakeYahooClient:
+        def company_evidence_batch(self, symbols, filing_limit, news_limit):
+            assert symbols == ["NFLX", "GOOGL", "MU"]
+            return {
+                "evidence": {
+                    symbol: {
+                        "filings": [{"type": "10-Q", "url": f"https://example.test/{symbol}"}],
+                        "news": [],
+                    }
+                    for symbol in symbols
+                },
+                "errors": {},
+            }
+
+    monkeypatch.setattr("csp_screener.iteration2.YahooFinanceMCPClient", FakeYahooClient)
+    result = _retrieve({
+        "symbol": "MU",
+        "symbols": ["NFLX", "GOOGL", "MU"],
+        "market_context": [
+            {"symbol": "NFLX"}, {"symbol": "GOOGL"}, {"symbol": "MU"}
+        ],
+        "warnings": [],
+    })
+    assert [row["symbol"] for row in result["evidence"]] == ["NFLX", "GOOGL", "MU"]
+
+
+def test_discovery_cards_keep_all_requested_candidates():
+    result = _validate_grounding_and_citations({
+        "answer": "- One\n- Two\n- Three",
+        "evidence": [],
+        "discovery_requested": True,
+        "requested_count": 5,
+        "market_context": [
+            {"symbol": symbol}
+            for symbol in ["NFLX", "MSFT", "META", "AVGO", "INTC"]
+        ],
+        "display_symbols": ["NFLX", "MSFT", "META"],
+        "selected_symbol": "NFLX",
+    })
+    assert result["display_symbols"] == ["NFLX", "MSFT", "META", "AVGO", "INTC"]
 
 
 def test_dashboard_graph_removes_ineligible_candidates_before_research():

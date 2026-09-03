@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from .course_e2e import _normalize_filings
 from .observability import TracingStatus, setup_tracing
 from .providers import YahooFinanceMCPClient
+from .parsing import parse_budget, parse_requested_count
 
 
 class ResearchState(TypedDict, total=False):
@@ -24,6 +25,7 @@ class ResearchState(TypedDict, total=False):
     warnings: list[str]
     discovery_requested: bool
     budget: float | None
+    requested_count: int
     intent: str
     research_summary: dict[str, Any]
     selected_symbol: str | None
@@ -72,10 +74,10 @@ class ResearchAnswer(BaseModel):
     bullet_points: list[
         Annotated[str, Field(min_length=1, max_length=240)]
     ] = Field(
-        min_length=3,
-        max_length=3,
+        min_length=1,
+        max_length=10,
         description=(
-            "Exactly three concise, non-redundant bullets grounded only in supplied evidence"
+            "One to ten concise, non-redundant bullets grounded only in supplied evidence"
         ),
     )
     risk_level: str = Field(description="low, medium, high, or unknown")
@@ -256,17 +258,19 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
         raise ValueError("Ask a research question between 1 and 600 characters.")
     discovery = ResearchAgent._needs_discovery(question)
     symbols = [] if discovery else ResearchAgent._symbols(symbol, question)
-    budget_match = re.search(r"\$\s*([\d,]+(?:\.\d+)?)|(?:budget|capital)(?:\s+of|\s+is)?\s*\$?\s*([\d,]+(?:\.\d+)?)", question, re.I)
-    budget_text = next((group for group in budget_match.groups() if group), None) if budget_match else None
+    budget = parse_budget(question)
+    requested_count = parse_requested_count(question)
     return {
         "symbol": symbol,
         "question": question,
         "symbols": symbols,
         "discovery_requested": discovery,
         "intent": "candidate_discovery" if discovery else "ticker_research",
-        "budget": float(budget_text.replace(",", "")) if budget_text else None,
+        "budget": budget,
+        "requested_count": requested_count,
         "mandate": {
-            "budget": float(budget_text.replace(",", "")) if budget_text else None,
+            "budget": budget,
+            "requested_count": requested_count,
             "strategy": "cash_secured_put",
             "risk_tolerance": next(
                 (risk for risk in ("low", "medium", "high") if f"{risk} risk" in question.lower()),
@@ -412,7 +416,7 @@ def _record_decision_and_evals(state: ResearchState) -> dict[str, Any]:
         "risk_status": state.get("risk_decision", {}).get("status"),
         "risk_reason_codes": state.get("risk_decision", {}).get("reason_codes", []),
         "citation_precision": round(sum(row.get("url") in allowed for row in citations) / len(citations), 3) if citations else 1.0,
-        "format_compliance": len(state.get("answer", "").splitlines()) == 3,
+        "format_compliance": 1 <= len(state.get("answer", "").splitlines()) <= 10,
         "ranking_authority": "deterministic",
     }}
 
@@ -421,10 +425,17 @@ def _validate_grounding_and_citations(state: ResearchState) -> dict[str, Any]:
     allowed_urls = {str(row.get("url")) for row in state.get("evidence", []) if row.get("url")}
     citations = [row for row in state.get("citations", []) if row.get("url") in allowed_urls]
     lines = [line for line in state.get("answer", "").splitlines() if line.strip()]
-    if len(lines) != 3 or any(not line.startswith("- ") for line in lines):
-        raise ValueError("Research response must contain exactly three bullet points.")
+    if not 1 <= len(lines) <= 10 or any(not line.startswith("- ") for line in lines):
+        raise ValueError("Research response must contain between one and ten bullet points.")
     context_symbols = {str(row.get("symbol")) for row in state.get("market_context", [])}
     display = [symbol for symbol in state.get("display_symbols", []) if symbol in context_symbols]
+    if state.get("discovery_requested"):
+        requested_count = int(state.get("requested_count", 3))
+        # Keep the deterministic shortlist authoritative for the screener cards.
+        display = [
+            str(row["symbol"]) for row in state.get("market_context", [])
+            if row.get("symbol") in context_symbols
+        ][:requested_count]
     selected = state.get("selected_symbol")
     return {
         "citations": citations,
@@ -464,15 +475,25 @@ def _prepare_screener_cards(state: ResearchState) -> dict[str, Any]:
 
 def _retrieve(state: ResearchState) -> dict[str, Any]:
     warnings = list(state.get("warnings", []))
+    symbols = list(dict.fromkeys(
+        str(row.get("symbol", "")).upper()
+        for row in state.get("market_context", [])
+        if row.get("symbol")
+    ))[:5]
     try:
-        evidence_symbol = state["symbols"][0] if state["symbols"] else state["symbol"]
-        packet = YahooFinanceMCPClient().company_evidence(
-            evidence_symbol, filing_limit=5, news_limit=3
+        result = YahooFinanceMCPClient().company_evidence_batch(
+            symbols, filing_limit=2, news_limit=3
         )
-        evidence = [
-            *_normalize_filings(packet.get("filings"), limit=5),
-            *(packet.get("news") or [])[:3],
-        ]
+        evidence = []
+        for ticker in symbols:
+            packet = (result.get("evidence") or {}).get(ticker, {})
+            rows = [
+                *_normalize_filings(packet.get("filings"), limit=2),
+                *(packet.get("news") or [])[:3],
+            ]
+            evidence.extend({**row, "symbol": ticker} for row in rows)
+        for ticker, error in (result.get("errors") or {}).items():
+            warnings.append(f"{ticker} Yahoo MCP retrieval failed: {error}")
     except Exception as exc:
         evidence = []
         warnings.append(f"Yahoo MCP retrieval failed: {type(exc).__name__}")
@@ -502,17 +523,26 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         [
             (
                 "system",
-                "You are Kezzy, a bounded CSP research assistant. Use only the supplied "
+                "You are CSP Research Bot, a bounded institutional-style CSP research assistant. Use only the supplied "
                 "deterministic market context and filing metadata. Explain and compare candidates, "
                 "but do not promise returns, tell the user what they should buy, or place trades. "
                 "For budget questions, discuss cash required and fit rather than directing an "
-                "investment. Never claim you read a filing body. If evidence cannot answer the "
-                "question, say so. Return only URLs and selected tickers present in the evidence. "
+                "investment. Never claim you read a filing body. Treat retrieved filings and news "
+                "as private research context: do not print source URLs, filing inventories, or a "
+                "citation list in the answer. Mention evidence only when its title/metadata signals "
+                "a material catalyst or risk such as earnings guidance, regulation, litigation, "
+                "financing, management changes, security incidents, or major product events. Briefly "
+                "state the implication without overstating what the metadata proves. Ignore routine "
+                "filings, generic price-move stories, and unrelated headlines. If no material item "
+                "is found, say that no material recent catalyst was identified. If evidence cannot "
+                "answer the question, say so. Return only selected tickers present in the evidence. "
                 "For puts, lower absolute delta and a lower strike are generally safer but offer "
                 "different premium; describe the tradeoff rather than declaring safety. Format "
                 "dates as Month day, year and contracts as 'TICKER · Month day, year · $strike put' "
-                "instead of displaying raw OCC symbols. Always return exactly three concise, "
-                "non-redundant bullet points. Keep every bullet under 240 characters.",
+                "instead of displaying raw OCC symbols. Return between one and ten concise, "
+                "non-redundant bullet points. Keep every bullet under 240 characters. For a "
+                "discovery request, use one bullet per supplied candidate when possible; "
+                "display_symbols must include all supplied candidates in deterministic order.",
             ),
             (
                 "human",
@@ -532,7 +562,8 @@ def _answer(state: ResearchState) -> dict[str, Any]:
     ).with_structured_output(ResearchAnswer)
     result = (prompt | model).invoke(
         {
-            "symbol": state["symbol"],
+            "symbol": "not applicable (discovery request)"
+            if state.get("discovery_requested") else state["symbol"],
             "question": state["question"],
             "evidence": state["evidence"],
             "market_context": state["market_context"],
@@ -542,6 +573,31 @@ def _answer(state: ResearchState) -> dict[str, Any]:
             "dossier": state.get("research_dossier", {}),
         }
     )
+    bullet_points = list(result.bullet_points)
+    if state.get("discovery_requested"):
+        requested = int(state.get("requested_count", 3))
+        contexts = state.get("market_context", [])[:requested]
+        mentioned = {
+            str(context.get("symbol"))
+            for context in contexts
+            if any(
+                re.search(rf"\b{re.escape(str(context.get('symbol')))}\b", point)
+                for point in bullet_points
+            )
+        }
+        for context in contexts:
+            ticker = str(context.get("symbol"))
+            if ticker in mentioned or len(bullet_points) >= 10:
+                continue
+            ranking = context.get("stock_ranking") or {}
+            fit = state.get("portfolio_fit", {}).get(ticker, {})
+            cash = fit.get("minimum_cash_required")
+            cash_text = f"; minimum eligible CSP collateral ${cash:,.0f}" if cash else ""
+            bullet_points.append(
+                f"{ticker}: deterministic score {ranking.get('score', 'not available')}, "
+                f"spot ${float(context.get('spot') or 0):,.2f}{cash_text}; review its "
+                "retrieved evidence and downside risk before making a decision."
+            )
     cited = [url for url in result.cited_urls if url in allowed_urls]
     citations = [
         {
@@ -559,7 +615,7 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         for url in cited
     ]
     return {
-        "answer": "\n".join(f"- {point.strip()}" for point in result.bullet_points),
+        "answer": "\n".join(f"- {point.strip()}" for point in bullet_points[:10]),
         "risk_level": result.risk_level.lower()
         if result.risk_level.lower() in {"low", "medium", "high", "unknown"}
         else "unknown",
@@ -670,7 +726,10 @@ class ResearchAgent:
 
     @staticmethod
     def _symbols(current: str, question: str) -> list[str]:
-        ignored = {"CSP", "DTE", "OTM", "ITM", "AI", "SEC", "ETF", "USD"}
+        ignored = {
+            "I", "A", "AN", "THE", "WHAT", "WHICH", "WHO", "WHERE", "WHEN",
+            "CSP", "DTE", "OTM", "ITM", "AI", "SEC", "ETF", "USD",
+        }
         mentioned = [
             token for token in re.findall(r"\b[A-Z]{1,5}\b", question)
             if token not in ignored
@@ -685,14 +744,18 @@ class ResearchAgent:
     def _needs_discovery(question: str) -> bool:
         lowered = question.lower()
         triggers = (
-            "where should", "what should", "top 10", "top ten", "top 3",
+            "where should", "what should", "stocks should", "stock should",
+            "top 10", "top ten", "top 5", "top five", "top 3",
             "top three", "give me top", "find me",
             "give me stocks", "based on budget", "under $", "with $", "i have $",
             "capital of", "capital is", "my capital", "budget of", "my budget",
             "medium risk", "high risk", "in a sector", "which sector",
         )
         explicit = re.findall(r"\b[A-Z]{1,5}\b", question)
-        meaningful = [token for token in explicit if token not in {"I", "CSP", "DTE", "AI"}]
+        meaningful = [
+            token for token in explicit
+            if token not in {"I", "A", "CSP", "DTE", "AI", "SEC", "ETF", "USD"}
+        ]
         return not meaningful and any(trigger in lowered for trigger in triggers)
 
     def ask(self, symbol: str, question: str) -> dict[str, Any]:
@@ -729,7 +792,7 @@ class ResearchAgent:
             selected = result["display_symbols"][0]
         return {
             "iteration": 2,
-            "agent": "Kezzy",
+            "agent": "CSP Research Bot",
             "status": "live",
             "evidence_scope": (
                 "Alpaca market data, deterministic screening, and Yahoo evidence via MCP"

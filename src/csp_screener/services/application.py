@@ -5,9 +5,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..config import Settings
 from ..agents import ResearchAgent
-from ..providers import AlpacaMarketDataProvider
+from ..providers import AlpacaMarketDataProvider, YahooFinanceMCPClient
 from ..workflows import IterationOneConfig, IterationOneWorkflow
-from .parsing import parse_budget
+from ..parsing import parse_budget, parse_requested_count
 
 
 class ApplicationService:
@@ -36,7 +36,12 @@ class ApplicationService:
             self.agent = None
 
     def options(self, symbol: str) -> dict[str, object]:
-        return self.workflow.options(symbol)
+        result = self.workflow.options(symbol)
+        try:
+            calendar = YahooFinanceMCPClient().next_earnings_date(symbol)
+            return {**result, "next_earnings": calendar.get("next_earnings")}
+        except Exception:
+            return {**result, "next_earnings": None}
 
     def screen(self, *, force: bool = False, research: bool = False) -> dict[str, object]:
         with self._cache_lock:
@@ -141,11 +146,10 @@ class ApplicationService:
     def discover_agent_candidates(self, question: str) -> list[dict[str, object]]:
         budget = parse_budget(question)
         candidates = list(self.screen().get("candidates", []))
-        if budget is not None:
-            candidates = [
-                row for row in candidates if float(row["price"]) * 100 <= budget
-            ]
-        shortlist = [row["symbol"] for row in candidates[:5]]
+        requested_count = parse_requested_count(question)
+        # Load a wider deterministic pool first. CSP affordability depends on the
+        # eligible put strike, not on buying 100 shares at the current stock price.
+        shortlist = [row["symbol"] for row in candidates[:10]]
         contexts: list[dict[str, object]] = []
         with ThreadPoolExecutor(max_workers=min(5, len(shortlist) or 1)) as pool:
             futures = {
@@ -157,11 +161,21 @@ class ApplicationService:
                     context = future.result()
                     context["discovery"] = {
                         "budget": budget,
-                        "affordability_rule": (
-                            "underlying price × 100 must not exceed budget"
-                        ),
+                        "requested_count": requested_count,
+                        "affordability_rule": "eligible CSP strike × 100 must not exceed budget",
                     }
-                    contexts.append(context)
+                    puts = [
+                        row for row in context.get("contracts", [])
+                        if row.get("strategy") == "Cash-secured put"
+                    ]
+                    minimum_cash = min(
+                        (float(row["cash_required"]) for row in puts), default=None
+                    )
+                    if budget is None or (
+                        minimum_cash is not None and minimum_cash <= budget
+                    ):
+                        context["discovery"]["minimum_cash_required"] = minimum_cash
+                        contexts.append(context)
                 except Exception as exc:
                     print(
                         f"[demo] {futures[future]} discovery failed: "
@@ -170,4 +184,4 @@ class ApplicationService:
         scores = {row["symbol"]: row["score"] for row in candidates}
         return sorted(
             contexts, key=lambda row: -scores.get(str(row["symbol"]), 0)
-        )
+        )[:requested_count]
