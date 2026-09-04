@@ -48,7 +48,7 @@ def test_profile_is_sent_to_screening_and_chat() -> None:
     assert "profileQuery(symbol)" in script
     assert "profile: profileRequestPayload()" in script
     assert "excluded by the active profile" in script
-    assert "exceeds the ${money.format(positionLimit)} profile limit" in script
+    assert "Exceeds ${money.format(positionLimit)} limit" in script
 
 
 def test_profile_fields_have_plain_language_hover_help() -> None:
@@ -68,3 +68,35 @@ def test_llm_profile_advisor_requires_apply_then_explicit_save() -> None:
     assert "Apply recommendation" in script
     assert "applied to the form but not saved" in script
     assert "Recommended presets" in script
+
+
+def test_dashboard_candidates_reflow_on_smaller_screens() -> None:
+    script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert 'class="candidate-capital"' in script
+    assert '.candidate-row{height:auto}' in styles
+    assert 'grid-template-areas:"rank symbol score" "rank reason reason" ". capital performance"' in styles
+    assert 'grid-template-areas:"rank symbol score" "reason reason reason" "capital capital performance"' in styles
+
+
+def test_chat_starts_collapsed_with_responsive_agent_launcher() -> None:
+    html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert 'class="app-shell right-collapsed"' in html
+    assert 'aria-label="Expand chat"' in html
+    assert 'class="agent-avatar"' in html
+    assert "Ask CSP AI" in html
+    assert ".right-collapsed .agent-launcher-label{display:block" in styles
+    assert ".app-shell:not(.right-collapsed) .chat-rail" in styles
+
+
+def test_chat_research_status_is_short_and_provider_neutral() -> None:
+    html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "Research workflow ready." in html
+    assert "Researching Yahoo evidence via MCP" not in script
+    assert "Checking recent developments…" in script
+    assert '"Q", "K", "MD"' in script
