@@ -16,72 +16,32 @@ The application is research-only: it does not place trades or provide personaliz
 
 ## Demo screenshots
 
-### Dashboard: eligible CSP shortlist
+### Architecture
 
-![Dashboard showing the eligible CSP shortlist and research classifications](docs/screenshots/dashboard-flow.png)
+![Interactive CSP intelligence architecture](docs/screenshots/architecture-dark.png)
 
-### Ticker screener: ranked option contracts
+### Profile
 
-![Ticker screener showing ranked cash-secured puts and covered calls](docs/screenshots/ticker-screener-flow.png)
+![Dark-mode investment profile and custom screening limits](docs/screenshots/profile-dark.png)
 
-### Arize: workflow traces
+### Dashboard
 
-![Arize project trace view for the research workflow](docs/screenshots/arize-traces.png)
+![Dark-mode dashboard with ten eligible CSP candidates](docs/screenshots/dashboard-dark.png)
 
-### LangGraph: bounded research routing
+### CSP screener and research chat
 
-![LangGraph routing diagram for research and follow-up questions](docs/screenshots/langgraph-routing.png)
+![Dark-mode MU option screen with a grounded CSP research response](docs/screenshots/screener-dark.png)
+
+### Paper portfolio
+
+![Dark-mode paper portfolio](docs/screenshots/portfolio-dark.png)
 
 ## Architecture
 
-Review the pending end-state design in either format:
+The main project file is the source architecture document:
 
-- [GitHub-rendered architecture and Mermaid diagrams](docs/ARCHITECTURE.md)
-- [Single-page HTML architecture review](docs/architecture-review.html)
-
-## Development workstreams
-
-The project is organized into independent workstreams with clear component boundaries:
-
-| Workstream | Responsibility | Primary paths | Stable interface |
-|---|---|---|---|
-| Market data | Alpaca API/MCP adapters, normalization, latency | `src/csp_screener/providers/` | `latest_trade`, `option_chain`, `daily_bars` |
-| CSP ranking | Eligibility rules, scoring, contract selection | `src/csp_screener/iteration1.py`, `src/csp_screener/workflows/` | `IterationOneWorkflow.screen/options` |
-| Research agent | Intent routing, RAG, follow-ups, memory | `src/csp_screener/iteration2.py`, `src/csp_screener/agents/` | `ResearchAgent.ask` |
-| Observability/evals | Arize spans, datasets, regression metrics | `src/csp_screener/observability.py`, `tests/` | Trace names and evaluation fixtures |
-| Application/API | Cache, scheduler, validation, API contracts | `src/csp_screener/services/`, `src/csp_screener/server.py` | `/api/screen`, `/api/options`, `/api/chat` |
-| Frontend | Dashboard, screener, profile and chat UX | `web/` | API response contracts |
-| QA/deployment | Integration tests, fixtures, hosting and runbooks | `tests/`, `docs/`, deployment configuration | Release checks |
-
-Detailed flows and component boundaries are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Repository layout
-
-```text
-capstone/
-├── src/csp_screener/
-│   ├── agents/             # Public research-agent interface
-│   ├── providers/          # External market-data adapters
-│   ├── services/           # Application orchestration and caching
-│   ├── workflows/          # Public workflow interfaces
-│   ├── config.py           # Centralized runtime configuration
-│   ├── iteration1.py       # Deterministic CSP workflow
-│   ├── iteration2.py       # LangGraph research workflow
-│   ├── observability.py    # Arize/OpenTelemetry setup
-│   ├── server.py           # Thin HTTP transport
-│   └── cli.py              # Alpaca latency benchmark CLI
-├── web/                    # Vanilla HTML, CSS and JavaScript UI
-├── tests/
-│   ├── unit/              # Fast tests grouped by component boundary
-│   └── integration/       # Cross-component workflow tests
-├── docs/                   # Architecture and component specifications
-├── .env.example            # Safe configuration template
-└── pyproject.toml          # Python package and dependencies
-```
-
-Tests mirror the application boundaries (`domain`, `agents`, `services`,
-`retrieval`, `configuration`, and `observability`) so contributors can work on
-one component without mixing its fixtures and assertions with another.
+- [Interactive architecture source](docs/interactive-flow.html)
+- [Hosted interactive architecture](https://csp-intelligence-flow.noidea.chatgpt.site)
 
 ## Prerequisites
 
