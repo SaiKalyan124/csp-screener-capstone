@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from csp_screener.config import WEB_ROOT, load_settings
 from csp_screener.services import ApplicationService
+from csp_screener.providers import SupabaseUsageQuota
 from csp_screener.profiles import normalize_profile
 
 
@@ -54,6 +55,12 @@ class ProfileRecommendationRequest(BaseModel):
     current_profile: ProfileInput | None = None
 
 
+class AuthenticatedUser(BaseModel):
+    user_id: str
+    email: str
+    access_token: str
+
+
 def profile_from_query(
     mode: str = Query(default="guided"),
     risk_level: str = Query(default="medium"),
@@ -89,10 +96,12 @@ def get_service() -> ApplicationService:
 app = FastAPI(title="CSP Screener Capstone", docs_url=None, redoc_url=None)
 
 
-def require_user(authorization: str | None = Header(default=None)) -> None:
+def require_user(
+    authorization: str | None = Header(default=None),
+) -> AuthenticatedUser | None:
     settings = load_settings()
     if not settings.auth_required:
-        return
+        return None
     if not settings.supabase_url or not settings.supabase_anon_key:
         raise HTTPException(status_code=503, detail="Hosted authentication is not configured.")
     if not authorization or not authorization.startswith("Bearer "):
@@ -107,12 +116,42 @@ def require_user(authorization: str | None = Header(default=None)) -> None:
                 raise HTTPException(status_code=401, detail="Your session is invalid.")
             user = json.loads(response.read() or b"{}")
         email = str(user.get("email") or "").strip().lower()
+        user_id = str(user.get("id") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Your session is invalid.")
         if settings.allowed_emails and email not in settings.allowed_emails:
             raise HTTPException(status_code=403, detail="This account is not approved for access.")
+        return AuthenticatedUser(
+            user_id=user_id,
+            email=email,
+            access_token=authorization.removeprefix("Bearer ").strip(),
+        )
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Your session expired. Sign in again.") from exc
+
+
+def reserve_ai_budget(user: AuthenticatedUser | None, estimated_cost_usd: float) -> dict[str, object] | None:
+    """Reserve conservative estimated spend before a hosted LLM request."""
+    if user is None:
+        return None
+    settings = load_settings()
+    if not settings.supabase_url or not settings.supabase_anon_key:
+        raise HTTPException(status_code=503, detail="The weekly AI usage guardrail is not configured.")
+    try:
+        result = SupabaseUsageQuota(settings.supabase_url, settings.supabase_anon_key).reserve(
+            user.access_token, estimated_cost_usd, settings.weekly_ai_budget_usd
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="The weekly AI usage guardrail is temporarily unavailable.") from exc
+    if not result.get("allowed"):
+        reset_at = result.get("resets_at", "next Monday")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Weekly AI limit reached. Your ${settings.weekly_ai_budget_usd:.2f} allowance resets {reset_at}.",
+        )
+    return result
 
 
 @app.get("/", include_in_schema=False)
@@ -153,10 +192,12 @@ def screen(
     refresh: bool = Query(default=False),
     research: bool = Query(default=False),
     profile: dict[str, object] = Depends(profile_from_query),
-    _: None = Depends(require_user),
+    user: AuthenticatedUser | None = Depends(require_user),
 ) -> dict[str, object]:
     try:
-        return get_service().screen(force=refresh, research=research, profile=profile)
+        usage = reserve_ai_budget(user, 0.08) if research else None
+        result = get_service().screen(force=refresh, research=research, profile=profile)
+        return {**result, "weekly_ai_usage": usage}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -177,7 +218,10 @@ def options(
 
 
 @app.post("/api/chat")
-def chat(payload: ChatRequest, _: None = Depends(require_user)) -> dict[str, object]:
+def chat(
+    payload: ChatRequest,
+    user: AuthenticatedUser | None = Depends(require_user),
+) -> dict[str, object]:
     symbol = payload.symbol.strip().upper()
     question = payload.question.strip()
     if not SYMBOL_RE.fullmatch(symbol):
@@ -185,8 +229,9 @@ def chat(payload: ChatRequest, _: None = Depends(require_user)) -> dict[str, obj
     if not question:
         raise HTTPException(status_code=400, detail="Question is required.")
     try:
+        usage = reserve_ai_budget(user, 0.03)
         profile = payload.profile.as_rules() if payload.profile else ProfileInput().as_rules()
-        return get_service().research(symbol, question, profile=profile)
+        return {**get_service().research(symbol, question, profile=profile), "weekly_ai_usage": usage}
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -196,9 +241,10 @@ def chat(payload: ChatRequest, _: None = Depends(require_user)) -> dict[str, obj
 @app.post("/api/profile/recommend")
 def recommend_profile(
     payload: ProfileRecommendationRequest,
-    _: None = Depends(require_user),
+    user: AuthenticatedUser | None = Depends(require_user),
 ) -> dict[str, object]:
     try:
+        reserve_ai_budget(user, 0.02)
         current = payload.current_profile.as_rules() if payload.current_profile else None
         return get_service().recommend_profile(
             payload.description.strip(), payload.available_capital, current

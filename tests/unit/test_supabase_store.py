@@ -65,3 +65,25 @@ def test_save_research_posts_expected_record(monkeypatch) -> None:
         "question": "Why MU?",
         "response": {"answer": "Example"},
     }
+
+
+def test_usage_quota_reserves_with_user_token(monkeypatch) -> None:
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        return Response({"allowed": True, "spent_usd": 0.03, "remaining_usd": 2.97})
+
+    monkeypatch.setattr(supabase, "urlopen", fake_urlopen)
+    quota = supabase.SupabaseUsageQuota("https://example.supabase.co", "anon-key")
+
+    result = quota.reserve("user-token", 0.03, 3.0)
+
+    assert result["allowed"] is True
+    request = captured["request"]
+    assert request.full_url.endswith("/rest/v1/rpc/consume_weekly_ai_budget")
+    assert request.get_header("Authorization") == "Bearer user-token"
+    assert json.loads(request.data) == {
+        "p_estimated_cost_usd": 0.03,
+        "p_weekly_limit_usd": 3.0,
+    }
