@@ -24,6 +24,7 @@ class Settings:
     supabase_service_role_key: str | None = None
     supabase_anon_key: str | None = None
     auth_required: bool = False
+    weekly_ai_budget_usd: float = 3.0
     allowed_emails: tuple[str, ...] = ()
     universe: tuple[str, ...] = DEFAULT_UNIVERSE
     refresh_seconds: int = 900
@@ -60,5 +61,6 @@ def load_settings() -> Settings:
         supabase_service_role_key=clean_env("SUPABASE_SERVICE_ROLE_KEY"),
         supabase_anon_key=clean_env("SUPABASE_ANON_KEY"),
         auth_required=(clean_env("AUTH_REQUIRED") or "false").lower() in {"1", "true", "yes"},
+        weekly_ai_budget_usd=float(clean_env("WEEKLY_AI_BUDGET_USD") or "3.00"),
         allowed_emails=allowed_emails,
     )
