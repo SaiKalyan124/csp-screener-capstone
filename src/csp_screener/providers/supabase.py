@@ -62,34 +62,3 @@ class SupabaseStateStore:
             data = response.read()
         return json.loads(data) if data else None
 
-
-class SupabaseUsageQuota:
-    """Authenticated REST adapter for atomic per-user AI budget reservations."""
-
-    def __init__(self, url: str, anon_key: str, timeout: float = 8.0) -> None:
-        self.rpc_url = url.rstrip("/") + "/rest/v1/rpc/consume_weekly_ai_budget"
-        self.anon_key = anon_key
-        self.timeout = timeout
-
-    def reserve(
-        self, access_token: str, estimated_cost_usd: float, weekly_limit_usd: float
-    ) -> dict[str, object]:
-        body = json.dumps({
-            "p_estimated_cost_usd": estimated_cost_usd,
-            "p_weekly_limit_usd": weekly_limit_usd,
-        }).encode("utf-8")
-        request = Request(
-            self.rpc_url,
-            data=body,
-            headers={
-                "apikey": self.anon_key,
-                "authorization": f"Bearer {access_token}",
-                "content-type": "application/json",
-            },
-            method="POST",
-        )
-        with urlopen(request, timeout=self.timeout) as response:
-            payload = json.loads(response.read() or b"{}")
-        if isinstance(payload, list):
-            payload = payload[0] if payload else {}
-        return payload if isinstance(payload, dict) else {}

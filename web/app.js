@@ -78,14 +78,15 @@ async function initializeAuth() {
     const { data } = await supabaseClient.auth.getSession();
     showAuthenticated(data.session);
     if (data.session) {
-      await Promise.allSettled([loadUserProfile(), runStockScreen(false)]);
+      await loadUserProfile();
+      await runStockScreen(false);
       if (location.hash === "#portfolio") loadPortfolio(false);
     }
     supabaseClient.auth.onAuthStateChange((_event, session) => {
       const wasSignedOut = !accessToken;
       showAuthenticated(session);
       if (session && wasSignedOut) {
-        Promise.allSettled([loadUserProfile(), runStockScreen(false)]);
+        loadUserProfile().then(() => runStockScreen(false));
         if (location.hash === "#portfolio") loadPortfolio(false);
       }
     });

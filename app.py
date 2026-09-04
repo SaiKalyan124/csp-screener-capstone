@@ -17,7 +17,6 @@ from pydantic import BaseModel
 
 from csp_screener.config import WEB_ROOT, load_settings
 from csp_screener.services import ApplicationService
-from csp_screener.providers import SupabaseUsageQuota
 from csp_screener.profiles import normalize_profile
 
 
@@ -132,28 +131,6 @@ def require_user(
         raise HTTPException(status_code=401, detail="Your session expired. Sign in again.") from exc
 
 
-def reserve_ai_budget(user: AuthenticatedUser | None, estimated_cost_usd: float) -> dict[str, object] | None:
-    """Reserve conservative estimated spend before a hosted LLM request."""
-    if user is None:
-        return None
-    settings = load_settings()
-    if not settings.supabase_url or not settings.supabase_anon_key:
-        raise HTTPException(status_code=503, detail="The weekly AI usage guardrail is not configured.")
-    try:
-        result = SupabaseUsageQuota(settings.supabase_url, settings.supabase_anon_key).reserve(
-            user.access_token, estimated_cost_usd, settings.weekly_ai_budget_usd
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="The weekly AI usage guardrail is temporarily unavailable.") from exc
-    if not result.get("allowed"):
-        reset_at = result.get("resets_at", "next Monday")
-        raise HTTPException(
-            status_code=429,
-            detail=f"Weekly AI limit reached. Your ${settings.weekly_ai_budget_usd:.2f} allowance resets {reset_at}.",
-        )
-    return result
-
-
 @app.get("/", include_in_schema=False)
 def home() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
@@ -195,9 +172,10 @@ def screen(
     user: AuthenticatedUser | None = Depends(require_user),
 ) -> dict[str, object]:
     try:
-        usage = reserve_ai_budget(user, 0.08) if research else None
         result = get_service().screen(force=refresh, research=research, profile=profile)
-        return {**result, "weekly_ai_usage": usage}
+        return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -229,9 +207,8 @@ def chat(
     if not question:
         raise HTTPException(status_code=400, detail="Question is required.")
     try:
-        usage = reserve_ai_budget(user, 0.03)
         profile = payload.profile.as_rules() if payload.profile else ProfileInput().as_rules()
-        return {**get_service().research(symbol, question, profile=profile), "weekly_ai_usage": usage}
+        return get_service().research(symbol, question, profile=profile)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -244,7 +221,6 @@ def recommend_profile(
     user: AuthenticatedUser | None = Depends(require_user),
 ) -> dict[str, object]:
     try:
-        reserve_ai_budget(user, 0.02)
         current = payload.current_profile.as_rules() if payload.current_profile else None
         return get_service().recommend_profile(
             payload.description.strip(), payload.available_capital, current

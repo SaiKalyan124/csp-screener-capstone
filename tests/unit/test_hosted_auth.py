@@ -14,7 +14,6 @@ def settings(**overrides: object) -> SimpleNamespace:
         "supabase_url": None,
         "supabase_anon_key": None,
         "allowed_emails": (),
-        "weekly_ai_budget_usd": 3.0,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -135,25 +134,3 @@ def test_hosted_mode_accepts_authenticated_email_on_allowlist(
     assert user is not None
     assert user.email == "member@example.com"
     assert user.access_token == "valid-token"
-
-
-def test_weekly_budget_rejection_returns_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    user = hosted_app.AuthenticatedUser(user_id="user-1", email="a@example.com", access_token="token")
-
-    class Quota:
-        def __init__(self, *_args):
-            pass
-
-        def reserve(self, *_args):
-            return {"allowed": False, "resets_at": "Monday"}
-
-    monkeypatch.setattr(hosted_app, "load_settings", lambda: settings(
-        supabase_url="https://example.supabase.co", supabase_anon_key="anon"
-    ))
-    monkeypatch.setattr(hosted_app, "SupabaseUsageQuota", Quota)
-
-    with pytest.raises(HTTPException) as error:
-        hosted_app.reserve_ai_budget(user, 0.03)
-
-    assert error.value.status_code == 429
-    assert "$3.00" in error.value.detail
