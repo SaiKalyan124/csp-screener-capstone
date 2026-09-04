@@ -73,6 +73,10 @@ def test_agent_extracts_multiple_tickers_for_comparison():
     ) == ["NVDA", "AMD", "INTC"]
 
 
+def test_filing_form_names_are_not_misread_as_tickers():
+    assert ResearchAgent._symbols("MU", "What is a 10-Q and how should I read its MD&A?") == ["MU"]
+
+
 def test_agent_detects_budget_request_as_discovery():
     assert ResearchAgent._needs_discovery(
         "I want medium risk ideas and I have $40,000. What are three CSP candidates?"

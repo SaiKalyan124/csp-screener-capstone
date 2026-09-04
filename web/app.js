@@ -175,6 +175,7 @@ function renderCandidate(candidate, index) {
     <span class="candidate-rank">${index + 1}</span>
     <span class="candidate-symbol"><strong></strong><small></small></span>
     <span class="candidate-reason"><strong>${researchLabel}</strong><span></span></span>
+    <span class="candidate-capital"><strong></strong><small></small></span>
     <span class="candidate-metric liquidity"><strong>$${number.format(candidate.avg_dollar_volume_m)}M</strong><small>avg dollar volume</small></span>
     <span class="candidate-metric"><strong class="${returnClass}">${candidate.return_3m_pct > 0 ? "+" : ""}${candidate.return_3m_pct}%</strong><small>3-month return</small></span>
     <span class="candidate-score">${candidate.score}</span>`;
@@ -182,14 +183,17 @@ function renderCandidate(candidate, index) {
   row.querySelector(".candidate-symbol small").textContent = money.format(candidate.price);
   const collateral = candidate.minimum_csp_collateral;
   const positionLimit = candidate.profile_position_limit;
-  const capitalNote = candidate.capital_fit === "fits"
-    ? `CSP collateral ${money.format(collateral)} fits the profile limit`
+  const capitalFit = row.querySelector(".candidate-capital");
+  capitalFit.classList.add(candidate.capital_fit === "fits" ? "fits" : candidate.capital_fit === "exceeds_limit" ? "exceeds" : "unknown");
+  capitalFit.querySelector("strong").textContent = collateral == null ? "Not available" : money.format(collateral);
+  capitalFit.querySelector("small").textContent = candidate.capital_fit === "fits"
+    ? "Fits profile limit"
     : candidate.capital_fit === "exceeds_limit"
-      ? `CSP collateral ${money.format(collateral)} exceeds the ${money.format(positionLimit)} profile limit`
-      : collateral != null
-        ? `Minimum CSP collateral ${money.format(collateral)}`
-        : "Capital fit not available";
-  row.querySelector(".candidate-reason span").textContent = `${capitalNote} · ${candidate.research_reason || candidate.reason}`;
+      ? `Exceeds ${money.format(positionLimit)} limit`
+      : "Minimum CSP collateral";
+  const researchText = candidate.research_reason || candidate.reason;
+  row.querySelector(".candidate-reason span").textContent = researchText;
+  row.querySelector(".candidate-reason").title = researchText;
   row.addEventListener("click", async () => {
     showView("screener");
     input.value = candidate.symbol;
@@ -827,7 +831,7 @@ const chatQuestion = document.querySelector("#chat-question");
 const chatMessages = document.querySelector("#chat-messages");
 
 function tickerFromQuestion(question) {
-  const ignored = new Set(["I", "AI", "CSP", "DTE", "ETF", "ITM", "OTM", "SEC", "USD"]);
+  const ignored = new Set(["I", "A", "AI", "CSP", "DTE", "ETF", "ITM", "OTM", "SEC", "USD", "Q", "K", "MD"]);
   const prefixed = question.match(/^\s*\$?([A-Za-z][A-Za-z.\-]{0,9})\s*:/);
   const cashtag = question.match(/\$([A-Za-z][A-Za-z.\-]{0,9})\b/);
   const uppercase = question.match(/\b[A-Z][A-Z.\-]{0,9}\b/g) || [];
@@ -859,7 +863,8 @@ async function askCspAnalyst(questionText) {
   userMessage.textContent = displayQuestion;
   const answerMessage = document.createElement("div");
   answerMessage.className = "assistant-message agent-response";
-  answerMessage.textContent = "Researching Yahoo evidence via MCP…";
+  const researchMessages = ["Reviewing market context…", "Checking recent developments…", "Analyzing available information…", "Preparing a concise view…"];
+  answerMessage.textContent = researchMessages[Math.floor(Math.random() * researchMessages.length)];
   chatMessages.append(userMessage, answerMessage);
   chatMessages.scrollTop = chatMessages.scrollHeight;
   chatForm.querySelector("button").disabled = true;

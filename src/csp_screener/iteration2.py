@@ -771,7 +771,7 @@ class ResearchAgent:
     def _symbols(current: str, question: str) -> list[str]:
         ignored = {
             "I", "A", "AN", "THE", "WHAT", "WHICH", "WHO", "WHERE", "WHEN",
-            "CSP", "DTE", "OTM", "ITM", "AI", "SEC", "ETF", "USD",
+            "CSP", "DTE", "OTM", "ITM", "AI", "SEC", "ETF", "USD", "Q", "K", "MD",
         }
         mentioned = [
             token for token in re.findall(r"\b[A-Z]{1,5}\b", question)
@@ -797,7 +797,7 @@ class ResearchAgent:
         explicit = re.findall(r"\b[A-Z]{1,5}\b", question)
         meaningful = [
             token for token in explicit
-            if token not in {"I", "A", "CSP", "DTE", "AI", "SEC", "ETF", "USD"}
+            if token not in {"I", "A", "CSP", "DTE", "AI", "SEC", "ETF", "USD", "Q", "K", "MD"}
         ]
         return not meaningful and any(trigger in lowered for trigger in triggers)
 
