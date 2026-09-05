@@ -444,6 +444,26 @@ def _independent_risk_gate(state: ResearchState) -> dict[str, Any]:
     }}
 
 
+def _csp_decision_bullet(state: ResearchState) -> str | None:
+    """Translate deterministic eligibility and risk gates into a bounded CSP view."""
+    if state.get("tool_route", {}).get("intent") != "company_disclosure":
+        return None
+    decision = state.get("risk_decision", {})
+    status = decision.get("status", "watch")
+    reasons = set(decision.get("reason_codes", []))
+    if status == "veto":
+        labels = {
+            "insufficient_market_data": "market data is incomplete",
+            "no_eligible_contracts": "no contract passed the active rules",
+            "insufficient_cash_collateral": "collateral exceeds the active limit",
+        }
+        detail = ", ".join(labels[reason] for reason in labels if reason in reasons)
+        return f"CSP view: Avoid for now under the active rules because {detail or 'a hard risk gate failed'}."
+    if status == "watch":
+        return "CSP view: Watch for now; the contracts may qualify, but the research evidence is too limited for a clear setup."
+    return "CSP view: Eligible to consider under the active rules; confirm the selected strike, collateral, premium, and event timing before acting."
+
+
 def _record_decision_and_evals(state: ResearchState) -> dict[str, Any]:
     citations = state.get("citations", [])
     allowed = {str(row.get("url")) for row in state.get("evidence", []) if row.get("url")}
@@ -627,6 +647,12 @@ def _answer(state: ResearchState) -> dict[str, Any]:
         }
     )
     bullet_points = list(result.bullet_points)
+    decision_bullet = _csp_decision_bullet(state)
+    if decision_bullet:
+        if len(bullet_points) >= 10:
+            bullet_points[-1] = decision_bullet
+        else:
+            bullet_points.append(decision_bullet)
     if state.get("discovery_requested"):
         requested = int(state.get("requested_count", 3))
         contexts = state.get("market_context", [])[:requested]

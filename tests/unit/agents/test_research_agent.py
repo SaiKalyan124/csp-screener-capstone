@@ -4,6 +4,7 @@ from csp_screener.iteration2 import (
     ResearchAnswer,
     ResearchAgent,
     _answer,
+    _csp_decision_bullet,
     _parse_question_and_profile,
     _prepare_screener_cards,
     _prepare_eligible_shortlist,
@@ -46,6 +47,21 @@ def test_answer_abstains_without_evidence_or_model_call():
     assert "cannot provide" in result["answer"]
     assert len(result["answer"].splitlines()) == 3
     assert all(line.startswith("- ") for line in result["answer"].splitlines())
+
+
+def test_disclosure_research_finishes_with_bounded_csp_decision() -> None:
+    base = {
+        "tool_route": {"intent": "company_disclosure"},
+        "risk_decision": {"status": "pass", "reason_codes": []},
+    }
+    assert _csp_decision_bullet(base).startswith("CSP view: Eligible to consider")
+
+    base["risk_decision"] = {
+        "status": "veto",
+        "reason_codes": ["no_eligible_contracts"],
+    }
+    assert "Avoid for now" in _csp_decision_bullet(base)
+    assert "no contract passed" in _csp_decision_bullet(base)
 
 
 def test_research_answer_allows_up_to_ten_concise_bullets():
