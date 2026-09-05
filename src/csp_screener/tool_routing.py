@@ -16,6 +16,12 @@ class ToolRoute:
 def route_research_tools(question: str) -> ToolRoute:
     """Choose read-only evidence tools deterministically before any LLM call."""
     text = question.strip().lower()
+    if re.search(r"\b(my|the)\s+portfolio\b|\b(holdings|positions)\b", text):
+        return ToolRoute(
+            "portfolio_review", ("portfolio_store", "alpaca_market_mcp"),
+            ("yahoo_finance_mcp", "tavily_search_mcp"),
+            "Load every saved position first, refresh its market context, then research material risks.",
+        )
     profile_only = (
         re.search(
             r"\b(configure|configuration|change|update|set|choose|recommend)\b.{0,50}"

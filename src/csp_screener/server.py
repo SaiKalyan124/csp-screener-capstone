@@ -84,7 +84,8 @@ class DemoHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "Question is required."}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(self.service.research(
-                symbol, question, profile=normalize_profile(payload.get("profile"))
+                symbol, question, profile=normalize_profile(payload.get("profile")),
+                portfolio_positions=list(payload.get("portfolio_positions") or [])[:50],
             ))
         except (ValueError, json.JSONDecodeError):
             self._send_json({"error": "Invalid JSON request."}, HTTPStatus.BAD_REQUEST)

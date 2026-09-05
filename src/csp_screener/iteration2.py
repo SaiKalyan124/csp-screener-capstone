@@ -42,6 +42,7 @@ class ResearchState(TypedDict, total=False):
     risk_decision: dict[str, Any]
     audit_record: dict[str, Any]
     profile: dict[str, Any]
+    portfolio_positions: list[dict[str, Any]]
     tool_route: dict[str, Any]
     latency_breakdown_ms: dict[str, float]
 
@@ -259,8 +260,21 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
         raise ValueError("Enter a valid ticker.")
     if not question or len(question) > 600:
         raise ValueError("Ask a research question between 1 and 600 characters.")
-    discovery = ResearchAgent._needs_discovery(question)
-    symbols = [] if discovery else ResearchAgent._symbols(symbol, question)
+    tool_route = route_research_tools(question)
+    positions = [
+        row for row in state.get("portfolio_positions", [])
+        if str(row.get("status", "OPEN")).upper() == "OPEN"
+    ]
+    portfolio_review = tool_route.intent == "portfolio_review"
+    discovery = False if portfolio_review else ResearchAgent._needs_discovery(question)
+    if portfolio_review:
+        symbols = list(dict.fromkeys(
+            str(row.get("underlying", "")).strip().upper()
+            for row in positions
+            if re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(row.get("underlying", "")).strip().upper())
+        ))[:10]
+    else:
+        symbols = [] if discovery else ResearchAgent._symbols(symbol, question)
     profile = state.get("profile", {})
     explicit_budget = parse_budget(question)
     available_capital = float(profile.get("available_capital", 0) or 0)
@@ -270,13 +284,15 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
     )
     budget = explicit_budget or profile_position_limit
     requested_count = parse_requested_count(question)
-    tool_route = route_research_tools(question)
     return {
         "symbol": symbol,
         "question": question,
         "symbols": symbols,
         "discovery_requested": discovery,
-        "intent": "candidate_discovery" if discovery else "ticker_research",
+        "intent": "portfolio_review" if portfolio_review else (
+            "candidate_discovery" if discovery else "ticker_research"
+        ),
+        "portfolio_positions": positions,
         "budget": budget,
         "requested_count": requested_count,
         "tool_route": {
@@ -300,6 +316,7 @@ def _parse_question_and_profile(state: ResearchState) -> dict[str, Any]:
             "avoid_earnings_preference": profile.get("avoid_earnings"),
             "willing_to_own_underlying": "unknown",
             "decision_scope": "research_only",
+            "portfolio_positions": positions,
         },
     }
 
@@ -573,7 +590,11 @@ def _answer(state: ResearchState) -> dict[str, Any]:
                 "instead of displaying raw OCC symbols. Return between one and ten concise, "
                 "non-redundant bullet points. Keep every bullet under 240 characters. For a "
                 "discovery request, use one bullet per supplied candidate when possible; "
-                "display_symbols must include all supplied candidates in deterministic order.",
+                "display_symbols must include all supplied candidates in deterministic order. "
+                "For a portfolio review, evaluate every supplied open position together: summarize "
+                "portfolio P&L and exposure from the position records, identify concentration and "
+                "assignment/collateral risks, and give position-level observations. Never replace "
+                "saved holdings with the current UI ticker.",
             ),
             (
                 "human",
@@ -736,7 +757,8 @@ class ResearchAgent:
         started = perf_counter()
         contexts: list[dict[str, Any]] = []
         warnings = list(state.get("warnings", []))
-        for symbol in state.get("symbols", [])[:5]:
+        limit = 10 if state.get("intent") == "portfolio_review" else 5
+        for symbol in state.get("symbols", [])[:limit]:
             try:
                 contexts.append(self.market_context_loader(symbol, state.get("profile")))
             except Exception as exc:
@@ -804,6 +826,7 @@ class ResearchAgent:
     def ask(
         self, symbol: str, question: str,
         profile: dict[str, Any] | None = None,
+        portfolio_positions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         symbol = symbol.strip().upper()
         question = question.strip()
@@ -823,6 +846,7 @@ class ResearchAgent:
                 "citations": [],
                 "warnings": [],
                 "profile": profile or {},
+                "portfolio_positions": portfolio_positions or [],
             }
         )
         symbols = result.get("symbols", [])

@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from csp_screener.config import WEB_ROOT, load_settings
 from csp_screener.services import ApplicationService
@@ -46,6 +46,7 @@ class ChatRequest(BaseModel):
     symbol: str
     question: str
     profile: ProfileInput | None = None
+    portfolio_positions: list[dict[str, object]] = Field(default_factory=list)
 
 
 class ProfileRecommendationRequest(BaseModel):
@@ -208,7 +209,10 @@ def chat(
         raise HTTPException(status_code=400, detail="Question is required.")
     try:
         profile = payload.profile.as_rules() if payload.profile else ProfileInput().as_rules()
-        return get_service().research(symbol, question, profile=profile)
+        return get_service().research(
+            symbol, question, profile=profile,
+            portfolio_positions=payload.portfolio_positions[:50],
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:

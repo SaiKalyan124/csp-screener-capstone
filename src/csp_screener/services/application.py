@@ -136,13 +136,17 @@ class ApplicationService:
             return {**result, "cache_status": "refreshed"}
 
     def research(
-        self, symbol: str, question: str, *, profile: dict[str, object] | None = None
+        self, symbol: str, question: str, *, profile: dict[str, object] | None = None,
+        portfolio_positions: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         if self.agent is None:
             raise RuntimeError(
                 "Research agent is unavailable; configure OPENAI_API_KEY to enable it."
             )
-        response = self.agent.ask(symbol, question, profile=profile)
+        response = self.agent.ask(
+            symbol, question, profile=profile,
+            portfolio_positions=portfolio_positions,
+        )
         if self.state_store is not None:
             try:
                 self.state_store.save_research(symbol, question, response)

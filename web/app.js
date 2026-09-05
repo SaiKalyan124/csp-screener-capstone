@@ -870,10 +870,17 @@ async function askCspAnalyst(questionText) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
   chatForm.querySelector("button").disabled = true;
   try {
+    const asksAboutPortfolio = /\b(my|the)\s+portfolio\b|\b(holdings|positions)\b/i.test(question);
+    const positions = asksAboutPortfolio ? await listPositions() : [];
     const response = await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, question, profile: profileRequestPayload() }),
+      body: JSON.stringify({
+        symbol,
+        question,
+        profile: profileRequestPayload(),
+        portfolio_positions: positions.filter((row) => row.status === "OPEN"),
+      }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || data.detail || "CSP Research Bot could not answer.");
